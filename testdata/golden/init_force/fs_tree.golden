@@ -1,0 +1,11 @@
+home/.config/devback/
+home/.config/devback/config.toml
+home/.config/devback/config.toml.bak.YYYYMMDD-HHMMSS
+home/.local/share/devback/repo-templates/
+home/.local/share/devback/repo-templates/devbackignore
+home/.local/share/devback/templates/hooks/
+home/.local/share/devback/templates/hooks/post-commit
+home/.local/share/devback/templates/hooks/post-merge
+home/.local/share/devback/templates/hooks/post-rewrite
+home/.local/state/devback/logs/
+home/backup/

@@ -1,0 +1,9 @@
+DevBack Status
+──────────────────────────────────────────────────────
+
+Global Configuration:
+  Config file:       ~/.config/devback/config.toml ✓
+  Hook templates:    ~/.local/share/devback/templates/hooks ✓ (default)
+  Backup base:       ~/backup ✓ (from config)
+  Log dir:           ~/.local/state/devback/logs ✓ (default)
+  Git templateDir:   ~/.local/share/devback/templates ✓

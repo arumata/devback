@@ -1,0 +1,23 @@
+TIMESTAMP INF Starting devback application
+TIMESTAMP INF Starting backup operation backup_dir=$TMPDIR/001/backup dry_run=false
+TIMESTAMP INF → Configuration:
+TIMESTAMP INF    Backup directory: $TMPDIR/001/backup
+TIMESTAMP INF    Keep count: 2
+TIMESTAMP INF    Keep days: 7
+TIMESTAMP INF    Max total GB per repo: 1
+TIMESTAMP INF    Size margin MB: 0
+TIMESTAMP INF    No size check: true
+TIMESTAMP INF    Snapshot time format: HHMMSS-NNNNNNNNN
+TIMESTAMP INF    Repo key style: name+hash
+TIMESTAMP INF
+TIMESTAMP INF → Repo key (name+hash): test-repo--HASH
+TIMESTAMP INF → Copy .git -> $TMPDIR/001/backup/test-repo--HASH/YYYY-MM-DD/HHMMSS-NANO/.git
+TIMESTAMP INF ✓ .git copied
+TIMESTAMP INF → No .devbackignore in repo
+TIMESTAMP INF → Raw ignored/untracked from git: 1
+TIMESTAMP INF       1  ignored.txt
+TIMESTAMP INF    KEEP: ignored.txt
+TIMESTAMP INF    COPIED: ignored.txt
+TIMESTAMP INF ✓ Copied ignored/untracked: 1 item(s)
+TIMESTAMP INF [rotate:summary] 1 snapshots, total 27 KiB
+TIMESTAMP INF ✓ Backup finished → $TMPDIR/001/backup/test-repo--HASH/YYYY-MM-DD/HHMMSS-NANO

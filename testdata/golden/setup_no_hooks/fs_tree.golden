@@ -1,0 +1,15 @@
+test-repo/.git/hooks/
+test-repo/.git/hooks/applypatch-msg.sample
+test-repo/.git/hooks/commit-msg.sample
+test-repo/.git/hooks/fsmonitor-watchman.sample
+test-repo/.git/hooks/post-update.sample
+test-repo/.git/hooks/pre-applypatch.sample
+test-repo/.git/hooks/pre-commit.sample
+test-repo/.git/hooks/pre-merge-commit.sample
+test-repo/.git/hooks/pre-push.sample
+test-repo/.git/hooks/pre-rebase.sample
+test-repo/.git/hooks/pre-receive.sample
+test-repo/.git/hooks/prepare-commit-msg.sample
+test-repo/.git/hooks/push-to-checkout.sample
+test-repo/.git/hooks/sendemail-validate.sample
+test-repo/.git/hooks/update.sample

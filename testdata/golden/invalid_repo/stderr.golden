@@ -1,0 +1,4 @@
+TIMESTAMP INF Starting devback application
+TIMESTAMP INF Starting backup operation backup_dir=$TMPDIR/001/backup dry_run=false
+TIMESTAMP ERR Not a git repository error="not a git repository in $TMPDIR/001/invalid-repo: exit status 128"
+not a git repository: critical error

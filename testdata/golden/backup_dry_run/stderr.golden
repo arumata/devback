@@ -1,0 +1,5 @@
+TIMESTAMP INF Starting devback application
+TIMESTAMP INF Starting backup operation backup_dir=$TMPDIR/001/backup dry_run=true
+TIMESTAMP INF Dry run: backup skipped; would create:$TMPDIR/001/backup/test-repo--HASH/YYYY-MM-DD/HHMMSS-NANO
+TIMESTAMP INF Dry run: would copy .git to:$TMPDIR/001/backup/test-repo--HASH/YYYY-MM-DD/HHMMSS-NANO/.git
+TIMESTAMP INF Dry run: would copy ignored/untracked: 1 item(s)

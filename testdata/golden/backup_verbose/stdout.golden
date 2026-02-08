@@ -1,0 +1,21 @@
+→ Configuration:
+   Backup directory: 
+   Keep count: 2
+   Keep days: 7
+   Max total GB per repo: 1
+   Size margin MB: 0
+   No size check: true
+   Snapshot time format: HHMMSS-NNNNNNNNN
+   Repo key style: name+hash
+
+→ Repo key (name+hash): test-repo--HASH
+→ Copy .git -> 
+✓ .git copied
+→ No .devbackignore in repo
+→ Raw ignored/untracked from git: 1
+      1  ignored.txt
+   KEEP: ignored.txt
+   COPIED: ignored.txt
+✓ Copied ignored/untracked: 1 item(s)
+[rotate:summary] 1 snapshots, total 27 KiB
+✓ Backup finished →

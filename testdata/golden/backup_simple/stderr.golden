@@ -1,0 +1,5 @@
+TIMESTAMP INF Starting devback application
+TIMESTAMP INF Starting backup operation backup_dir=$TMPDIR/001/backup dry_run=false
+TIMESTAMP INF ✓ .git copied
+TIMESTAMP INF ✓ Copied ignored/untracked: 1 item(s)
+TIMESTAMP INF ✓ Backup finished → $TMPDIR/001/backup/test-repo--HASH/YYYY-MM-DD/HHMMSS-NANO

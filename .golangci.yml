@@ -1,0 +1,119 @@
+version: "2"
+
+run:
+  timeout: 5m
+  issues-exit-code: 1
+  tests: true
+  relative-path-mode: cfg
+
+linters:
+  default: standard
+  enable:
+    - govet
+    - staticcheck
+    - revive
+    - errcheck
+    - gocyclo
+    - goconst
+    - misspell
+    - lll
+    - depguard
+    - gochecknoglobals
+    - godox          # запрет TODO/FIXME/HACK
+    - unused
+    - ineffassign
+    - unparam
+    - gocritic
+    - gosec          # безопасность
+    - unconvert      # ненужные конверсии
+    - dupl           # дублирование кода
+    - prealloc       # предаллокация слайсов
+  settings:
+    gocyclo:
+      min-complexity: 15
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    lll:
+      line-length: 120
+    dupl:
+      threshold: 100
+    gosec:
+      excludes:
+        - G204  # разрешаем subprocess с переменными (для git команд)
+    prealloc:
+      simple: true
+      range-loops: true
+    revive:
+      rules:
+        - name: exported
+    depguard:
+      rules:
+        # Запрет прямых системных вызовов в usecase слое
+        usecase-restrictions:
+          files:
+            - "**/internal/usecase/*.go"
+            - "**/internal/usecase/**/*.go"
+            - "!$test"
+          deny:
+            - pkg: os
+              desc: "В usecase запрещены прямые системные вызовы. Используйте адаптеры."
+            - pkg: os/exec
+              desc: "В usecase запрещен os/exec. Используйте git-adapter."
+            - pkg: path/filepath
+              desc: "В usecase запрещен path/filepath. Используйте fs-adapter."
+            - pkg: syscall
+              desc: "В usecase запрещены прямые syscall. Используйте адаптеры."
+          include-go-root: true
+        # Ограничение os/exec: допустим только в адаптерах
+        exec-restrictions:
+          files:
+            - "**/internal/*.go"
+            - "**/internal/**/*.go"
+            - "!**/internal/adapters/*.go"
+            - "!**/internal/adapters/**/*.go"
+            - "!$test"
+          deny:
+            - pkg: os/exec
+              desc: "os/exec допустим только в internal/adapters/*"
+          include-go-root: true
+
+formatters:
+  enable:
+    - gci
+    - gofumpt
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/arumata/devback)
+        - prefix(github.com/)
+    gofumpt:
+      # Module path which contains the source code being formatted.
+      # Default: ""
+      module-path: github.com/arumata/devback
+      # Choose whether to use the extra rules.
+      # Default: false
+      extra-rules: true
+      
+issues:
+  exclude-use-default: false
+  exclude-rules:
+    # В тестах допускаем длинные строки и цикломатику
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - lll
+    # Разрешаем TODO в тестах (но не в коде, который попадает в сборку)
+    - path: _test\.go
+      linters:
+        - godox
+    # В тестах допускаем менее строгие права доступа и файловые операции
+    - path: _test\.go
+      linters:
+        - gosec
+
+output:
+  sort-results: true
+
