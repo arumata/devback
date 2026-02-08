@@ -1,0 +1,12 @@
+Initialize DevBack
+
+Usage:
+  devback init [flags]
+
+Flags:
+      --backup-dir string   backup base directory (suggested: ~/.local/share/devback/backups)
+      --dry-run             plan changes without writing to disk
+      --force               overwrite existing config and git init.templateDir (with backup for config)
+  -h, --help                help for init
+      --no-gitconfig        skip global git config change
+      --templates-only      install/update templates only

@@ -1,0 +1,25 @@
+DevBack Status
+──────────────────────────────────────────────────────
+
+Global Configuration:
+  Config file:       ~/.config/devback/config.toml ✓
+  Hook templates:    ~/.local/share/devback/templates/hooks ✓ (default)
+  Backup base:       ~/backup ✓ (from config)
+  Log dir:           ~/.local/state/devback/logs ✓ (default)
+  Git templateDir:   ~/.local/share/devback/templates ✓
+
+Current Repository: $TMPDIR/001/test-repo
+  Type:              Regular repository
+  Branch:            master
+  Hooks installed:   ✓ (3 of 3)
+  Hooks executable:  ✓ (3 of 3)
+  Hooks current:     ✓ (matches global templates)
+  Backup enabled:    ✓
+  Backup slug:       – (not set)
+  Repo key:          test-repo--HASH
+  Last backup:       YYYY-MM-DD 13:00:00
+  Snapshots:         2
+  Size:              4 KiB
+
+Worktrees:
+  ▶ $TMPDIR/001/test-repo  [BRANCH]

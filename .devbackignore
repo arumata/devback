@@ -1,0 +1,50 @@
+# DevBack backup ignore file
+# Patterns to exclude from backup of untracked/ignored files.
+# Format: one pattern per line. Lines starting with # are comments.
+# Glob patterns (*, ?, [) and path patterns (with /) are supported.
+
+# Dependencies
+node_modules
+vendor
+.venv
+venv
+__pycache__
+.bundle
+.cargo
+bower_components
+
+# Build output
+dist
+build
+target
+out
+bin
+obj
+*.o
+*.a
+*.so
+*.dylib
+
+# IDE and editors (uncomment if you don't need these in backups)
+# .idea
+# .vscode
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Containers
+.docker
+
+# Caches
+.cache
+.npm
+.yarn
+.pnpm-store
+.gradle
+.m2
+.ivy2

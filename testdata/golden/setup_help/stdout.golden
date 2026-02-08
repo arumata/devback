@@ -1,0 +1,11 @@
+Configure current repository for DevBack
+
+Usage:
+  devback setup [flags]
+
+Flags:
+      --dry-run       plan changes without writing to disk
+      --force         overwrite existing hooks (main repository only)
+  -h, --help          help for setup
+      --no-hooks      configure git without installing hooks
+      --slug string   set backup.slug (worktree: config.worktree)

@@ -1,0 +1,21 @@
+Usage:
+  devback [flags]
+  devback [command]
+
+Available Commands:
+  completion  Generate the autocompletion script for the specified shell
+  help        Help about any command
+  hook        Git hook commands (called by git hooks)
+  init        Initialize DevBack
+  setup       Configure current repository for DevBack
+  status      Show DevBack configuration and repository status
+  version     Print version information
+
+Flags:
+      --dry-run          full dry-run (no filesystem changes)
+  -h, --help             help for devback
+      --print-repo-key   print repository key and exit (no backup)
+      --test-locks       test enhanced lock system and exit
+  -v, --verbose          verbose output
+
+Use "devback [command] --help" for more information about a command.

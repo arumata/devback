@@ -1,0 +1,10 @@
+Show DevBack configuration and repository status
+
+Usage:
+  devback status [flags]
+
+Flags:
+      --dry-run        accept but do not change behavior
+  -h, --help           help for status
+      --no-repo        show only global configuration
+      --scan-backups   scan backups for snapshots and size

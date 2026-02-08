@@ -1,0 +1,2 @@
+TIMESTAMP INF Starting devback application
+backup.base_dir not configured (run: devback init --backup-dir <path>)
