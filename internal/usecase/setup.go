@@ -258,7 +258,6 @@ func applySetupHooks(
 			return err
 		}
 	}
-	removeLegacyFiles(ctx, deps.FileSystem, repo.hooksDir, opts.DryRun, logger, "hook")
 	return setBackupEnabled(ctx, deps.Git, repo.repoRoot, opts.DryRun)
 }
 

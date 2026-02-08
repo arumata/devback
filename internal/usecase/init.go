@@ -66,7 +66,7 @@ func Init(ctx context.Context, opts InitOptions, deps *Dependencies, logger *slo
 		}
 	}
 
-	if err := installAllTemplates(ctx, deps, homeDir, templatesDir, opts, logger); err != nil {
+	if err := installAllTemplates(ctx, deps, homeDir, templatesDir, opts); err != nil {
 		return err
 	}
 
@@ -231,12 +231,11 @@ func shouldConfigureGit(opts InitOptions) bool {
 }
 
 func installAllTemplates(
-	ctx context.Context, deps *Dependencies, homeDir, templatesDir string, opts InitOptions, logger *slog.Logger,
+	ctx context.Context, deps *Dependencies, homeDir, templatesDir string, opts InitOptions,
 ) error {
 	if err := installTemplates(ctx, deps, templatesDir, opts.BinaryPath, opts.DryRun); err != nil {
 		return err
 	}
-	removeLegacyFiles(ctx, deps.FileSystem, templatesDir, opts.DryRun, logger, "template")
 
 	repoTemplatesDir, err := normalizeTemplatesDir(DefaultRepoTemplatesDir(), homeDir)
 	if err != nil {
@@ -245,7 +244,6 @@ func installAllTemplates(
 	if err := installRepoTemplates(ctx, deps, repoTemplatesDir, opts.DryRun); err != nil {
 		return err
 	}
-	removeLegacyRepoTemplatesDir(ctx, deps.FileSystem, templatesDir, opts.DryRun, logger)
 
 	if shouldConfigureGit(opts) {
 		if deps.Git == nil {
@@ -471,58 +469,4 @@ func installRepoTemplates(ctx context.Context, deps *Dependencies, repoTemplates
 	}
 
 	return nil
-}
-
-func legacyHookFiles() []string {
-	return []string{
-		"_run-backup",
-		"hooks-config",
-		"hooks-lib.sh",
-		"post-checkout",
-		"post-rebase",
-		"pre-commit",
-		"pre-rebase",
-		"prepare-commit-msg",
-	}
-}
-
-func removeLegacyFiles(
-	ctx context.Context, fs FileSystemPort, dir string, dryRun bool, logger *slog.Logger, label string,
-) {
-	if dryRun {
-		return
-	}
-	for _, name := range legacyHookFiles() {
-		if ctx.Err() != nil {
-			return
-		}
-		target := fs.Join(dir, name)
-		exists, err := pathExists(ctx, fs, target)
-		if err != nil || !exists {
-			continue
-		}
-		if err := fs.RemoveAll(ctx, target); err != nil {
-			logger.WarnContext(ctx, "Failed to remove legacy "+label, "file", name, "error", err)
-			continue
-		}
-		logger.InfoContext(ctx, "Removed legacy "+label, "file", name)
-	}
-}
-
-func removeLegacyRepoTemplatesDir(
-	ctx context.Context, fs FileSystemPort, templatesDir string, dryRun bool, logger *slog.Logger,
-) {
-	if dryRun {
-		return
-	}
-	legacyDir := fs.Join(fs.Dir(templatesDir), "repo")
-	exists, err := pathExists(ctx, fs, legacyDir)
-	if err != nil || !exists {
-		return
-	}
-	if err := fs.RemoveAll(ctx, legacyDir); err != nil {
-		logger.WarnContext(ctx, "Failed to remove legacy repo templates dir", "path", legacyDir, "error", err)
-		return
-	}
-	logger.InfoContext(ctx, "Removed legacy repo templates dir", "path", legacyDir)
 }
