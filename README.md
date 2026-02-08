@@ -1,5 +1,10 @@
 # DevBack
 
+[![Go Version](https://img.shields.io/github/go-mod/go-version/arumata/devback)](https://go.dev/)
+[![License](https://img.shields.io/github/license/arumata/devback)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/arumata/devback)](https://github.com/arumata/devback/releases/latest)
+[![Homebrew Cask](https://img.shields.io/badge/homebrew-cask-orange)](https://github.com/arumata/homebrew-tap)
+
 A compact CLI tool for creating full backups of Git repositories, including the `.git` directory and all ignored/untracked files.
 
 ## Overview
