@@ -49,8 +49,16 @@ Snapshot directories are reserved atomically via exclusive directory creation an
 
 ```bash
 brew tap arumata/tap
-brew install devback
+brew install --cask devback
 ```
+
+### Go Install
+
+```bash
+go install github.com/arumata/devback/cmd/app@latest
+```
+
+Requires Go 1.24+. The binary will be installed to `$GOPATH/bin` (or `$HOME/go/bin` by default).
 
 ### Download Binary
 
