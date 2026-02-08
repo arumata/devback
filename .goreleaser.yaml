@@ -76,4 +76,12 @@ homebrew_casks:
     homepage: "https://github.com/arumata/devback"
     description: "CLI tool for Git repository backups"
     license: "MIT"
+    url:
+      verified: "github.com/arumata/devback"
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/devback"]
+          end
     commit_msg_template: "Brew cask update for {{ .ProjectName }} version {{ .Tag }}"
