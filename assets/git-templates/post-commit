@@ -1,4 +1,5 @@
 #!/bin/sh
 DEVBACK="__DEVBACK_BIN__"
-[ -x "$DEVBACK" ] || { echo "SKIP: devback not found at $DEVBACK" >&2; exit 0; }
+[ -x "$DEVBACK" ] || DEVBACK="$(command -v devback 2>/dev/null)"
+[ -x "$DEVBACK" ] || { echo "SKIP: devback not found" >&2; exit 0; }
 exec "$DEVBACK" hook post-commit "$@"

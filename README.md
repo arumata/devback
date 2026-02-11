@@ -301,12 +301,14 @@ Example: `base_dir = "~/backups"` expands to `/home/user/backups`.
 
 DevBack installs only three hooks: `post-commit`, `post-merge`, `post-rewrite`.
 Templates are located in `~/.local/share/devback/templates/hooks/` and copied to `.git/hooks/`
-by `devback setup`. The wrappers are minimal and call the binary path captured during `devback init`:
+by `devback setup`. The wrappers are minimal: they use the path captured during `devback init`
+with an automatic fallback to `PATH` lookup:
 
 ```sh
 #!/bin/sh
 DEVBACK="__DEVBACK_BIN__"
-[ -x "$DEVBACK" ] || { echo "SKIP: devback not found at $DEVBACK" >&2; exit 0; }
+[ -x "$DEVBACK" ] || DEVBACK="$(command -v devback 2>/dev/null)"
+[ -x "$DEVBACK" ] || { echo "SKIP: devback not found" >&2; exit 0; }
 exec "$DEVBACK" hook post-commit "$@"
 ```
 

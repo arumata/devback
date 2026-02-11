@@ -19,7 +19,8 @@ const (
 func hookTemplateContent(hookName string) string {
 	return "#!/bin/sh\n" +
 		"DEVBACK=\"" + testDevbackPath + "\"\n" +
-		"[ -x \"$DEVBACK\" ] || { echo \"SKIP: devback not found at $DEVBACK\" >&2; exit 0; }\n" +
+		"[ -x \"$DEVBACK\" ] || DEVBACK=\"$(command -v devback 2>/dev/null)\"\n" +
+		"[ -x \"$DEVBACK\" ] || { echo \"SKIP: devback not found\" >&2; exit 0; }\n" +
 		"exec \"$DEVBACK\" hook " + hookName + " \"$@\"\n"
 }
 

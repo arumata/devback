@@ -37,11 +37,6 @@ func newInitCmd(depsFactory func(*slog.Logger) *usecase.Dependencies, exitCode *
 				handleCmdError(exitCode, fmt.Errorf("resolve executable path: %w", usecase.ErrCritical))
 				return
 			}
-			binPath, err := filepath.EvalSymlinks(exePath)
-			if err != nil {
-				handleCmdError(exitCode, fmt.Errorf("resolve executable symlink: %w", usecase.ErrCritical))
-				return
-			}
 			opts := usecase.InitOptions{
 				BackupDir:     backupDir,
 				Force:         force,
@@ -49,7 +44,7 @@ func newInitCmd(depsFactory func(*slog.Logger) *usecase.Dependencies, exitCode *
 				TemplatesOnly: templatesOnly,
 				DryRun:        dryRun,
 				HomeDir:       homeDir,
-				BinaryPath:    binPath,
+				BinaryPath:    filepath.Clean(exePath),
 			}
 			handleCmdError(exitCode, usecase.Init(cmd.Context(), opts, deps, logger))
 		},

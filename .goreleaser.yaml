@@ -84,4 +84,5 @@ homebrew_casks:
           if OS.mac?
             system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/devback"]
           end
+          system_command "#{staged_path}/devback", args: ["init", "--templates-only", "--force"]
     commit_msg_template: "Brew cask update for {{ .ProjectName }} version {{ .Tag }}"

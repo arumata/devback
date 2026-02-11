@@ -107,6 +107,14 @@ type fakeTemplatesPort struct {
 	repoContents map[string][]byte
 }
 
+func fakeHookTemplate(hookName string) []byte {
+	return []byte("#!/bin/sh\n" +
+		"DEVBACK=\"__DEVBACK_BIN__\"\n" +
+		"[ -x \"$DEVBACK\" ] || DEVBACK=\"$(command -v devback 2>/dev/null)\"\n" +
+		"[ -x \"$DEVBACK\" ] || { echo \"SKIP: devback not found\" >&2; exit 0; }\n" +
+		"exec \"$DEVBACK\" hook " + hookName + " \"$@\"\n")
+}
+
 func newFakeTemplatesPort() *fakeTemplatesPort {
 	return &fakeTemplatesPort{
 		entries: []TemplateEntry{
@@ -115,9 +123,9 @@ func newFakeTemplatesPort() *fakeTemplatesPort {
 			{Name: "post-rewrite", Mode: 0o755},
 		},
 		contents: map[string][]byte{
-			"post-commit":  []byte("#!/bin/sh\nDEVBACK=\"__DEVBACK_BIN__\"\nexec \"$DEVBACK\" hook post-commit \"$@\"\n"),
-			"post-merge":   []byte("#!/bin/sh\nDEVBACK=\"__DEVBACK_BIN__\"\nexec \"$DEVBACK\" hook post-merge \"$@\"\n"),
-			"post-rewrite": []byte("#!/bin/sh\nDEVBACK=\"__DEVBACK_BIN__\"\nexec \"$DEVBACK\" hook post-rewrite \"$@\"\n"),
+			"post-commit":  fakeHookTemplate("post-commit"),
+			"post-merge":   fakeHookTemplate("post-merge"),
+			"post-rewrite": fakeHookTemplate("post-rewrite"),
 		},
 		repoEntries: []TemplateEntry{
 			{Name: "devbackignore", Mode: 0o644},
