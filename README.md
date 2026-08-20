@@ -238,6 +238,33 @@ remote_hash_len = 8
 | `size_margin_mb` | int | `0` | Margin in MB added to `max_total_gb` before triggering size-based rotation. |
 | `no_size` | bool | `true` | Disable size-based rotation. When `true`, `max_total_gb` and `size_margin_mb` are ignored. |
 
+#### Per-Repository Rotation Overrides
+
+Rotation settings from the `[backup]` section can be overridden per repository
+via git config. Git config variable names cannot contain underscores, so the
+keys use camelCase:
+
+| git config | config.toml |
+|------------|-------------|
+| `backup.keepCount` | `keep_count` |
+| `backup.keepDays` | `keep_days` |
+| `backup.maxTotalGb` | `max_total_gb` |
+| `backup.sizeMarginMb` | `size_margin_mb` |
+| `backup.noSize` | `no_size` |
+
+Example — keep only 8 snapshots for a repository with large snapshots:
+
+```sh
+git config --local backup.keepCount 8
+```
+
+Resolution order matches `backup.enabled`: worktree config → local → global
+git config, applied on top of the global `config.toml`. Check the effective
+values with `devback status` (each value is marked `repo override` or
+`global`) or `devback -v --dry-run`. An invalid value (not an integer, a
+negative number, or a non-boolean for `backup.noSize`) fails the backup with
+an explicit error instead of silently falling back to the global value.
+
 #### `[notifications]` — Desktop Notifications
 
 | Field | Type | Default | Description |

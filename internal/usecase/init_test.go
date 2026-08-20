@@ -55,6 +55,14 @@ func (m *mockGitInit) ConfigSetGlobal(ctx context.Context, key, value string) er
 	return nil
 }
 
+func (m *mockGitInit) GetCommitHash(ctx context.Context, repoPath string) (string, error) {
+	return "", nil
+}
+
+func (m *mockGitInit) ObjectExists(ctx context.Context, repoPath, hash string) (bool, error) {
+	return true, nil
+}
+
 func (m *mockGitInit) GitDir(ctx context.Context, repoPath string) (string, error) {
 	return "", nil
 }

@@ -193,6 +193,11 @@ func (a Adapter) GetCommitHash(ctx context.Context, repoPath string) (string, er
 	return "", errNotImplemented
 }
 
+// ObjectExists returns error for git operations
+func (a Adapter) ObjectExists(ctx context.Context, repoPath, hash string) (bool, error) {
+	return false, errNotImplemented
+}
+
 // GetRemotes returns error for git operations
 func (a Adapter) GetRemotes(ctx context.Context, repoPath string) ([]usecase.Remote, error) {
 	return nil, errNotImplemented

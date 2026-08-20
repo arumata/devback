@@ -206,7 +206,7 @@ func (a *testFileSystem) Clean(path string) string      { return filepath.Clean(
 func (a *testFileSystem) VolumeName(path string) string { return filepath.VolumeName(path) }
 func (a *testFileSystem) PathSeparator() byte           { return os.PathSeparator }
 func (a *testFileSystem) IsNotExist(err error) bool {
-	return os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR)
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)
 }
 func (a *testFileSystem) IsExist(err error) bool { return os.IsExist(err) }
 func (a *testFileSystem) IsPermission(err error) bool {
@@ -286,6 +286,25 @@ func (a *testGitAdapter) ConfigSetWorktree(ctx context.Context, repoPath, key, v
 
 func (a *testGitAdapter) ConfigSetGlobal(ctx context.Context, key, value string) error {
 	return fmt.Errorf("not implemented")
+}
+
+func (a *testGitAdapter) GetCommitHash(ctx context.Context, repoPath string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
+	cmd.Dir = repoPath
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func (a *testGitAdapter) ObjectExists(ctx context.Context, repoPath, hash string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "cat-file", "-e", hash)
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		return false, nil
+	}
+	return true, nil
 }
 
 func (a *testGitAdapter) GitDir(ctx context.Context, repoPath string) (string, error) {

@@ -460,8 +460,24 @@ func isPermissionError(fs FileSystemPort, err error) bool {
 	return fs.IsPermission(err)
 }
 
+func isVanishedError(fs FileSystemPort, err error) bool {
+	if err == nil || fs == nil {
+		return false
+	}
+	return fs.IsNotExist(err)
+}
+
+// recordCopyError classifies a copy failure. Files that disappear between
+// enumeration and copy (ENOENT) are counted as vanished — a benign race with
+// git gc or concurrent changes — and do not fail the backup.
 func recordCopyError(fs FileSystemPort, path string, err error, result *BackupResult, copyErrors *[]string) {
 	if err == nil {
+		return
+	}
+	if isVanishedError(fs, err) {
+		if result != nil {
+			result.VanishedFiles++
+		}
 		return
 	}
 	msg := fmt.Sprintf("%s: %v", path, err)
@@ -644,7 +660,7 @@ func (s *copySelectedState) recordError(path string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	recordCopyError(s.deps.FileSystem, path, err, s.result, &s.copyErrors)
-	if s.firstErr == nil {
+	if s.firstErr == nil && !isVanishedError(s.deps.FileSystem, err) {
 		s.firstErr = err
 	}
 }
@@ -673,7 +689,11 @@ func copySelectedWorker(
 				return
 			}
 			if err := copySelectedPath(ctx, state, rel); err != nil {
-				state.bc.warnf("%v", err)
+				if isVanishedError(state.deps.FileSystem, err) {
+					state.bc.vlogf("%v (vanished)", err)
+				} else {
+					state.bc.warnf("%v", err)
+				}
 				state.recordError(rel, err)
 			}
 		}
@@ -1053,7 +1073,8 @@ func printConfig(cfg *Config, bc *backupContext) {
 }
 
 func printBackupSummary(result *BackupResult, bc *backupContext) {
-	if result.SkippedFiles == 0 && len(result.PermissionErrs) == 0 && len(result.OtherErrors) == 0 {
+	if result.SkippedFiles == 0 && result.VanishedFiles == 0 &&
+		len(result.PermissionErrs) == 0 && len(result.OtherErrors) == 0 {
 		return
 	}
 
@@ -1062,6 +1083,10 @@ func printBackupSummary(result *BackupResult, bc *backupContext) {
 
 	if result.SkippedFiles > 0 {
 		bc.warnf("WARNING: Skipped %d files due to errors", result.SkippedFiles)
+	}
+
+	if result.VanishedFiles > 0 {
+		bc.logf("NOTE: %d file(s) vanished during copy (likely git gc); not treated as errors", result.VanishedFiles)
 	}
 
 	if len(result.PermissionErrs) > 5 {
@@ -1111,18 +1136,18 @@ func copyRepoSnapshot(
 		return fmt.Errorf("git common dir not found: %w", err)
 	}
 	bc.vlogf("→ Copy .git -> %s", dstGit)
-	if err := copyDirRecursive(ctx, deps, srcGit, dstGit, result, bc); err != nil {
+	if err := copyGitDirWithRetry(ctx, deps, srcGit, dstGit, result, bc); err != nil {
 		bc.warnf("copy .git encountered issues: %v", err)
 		return err
-	} else {
-		bc.logf("✓ .git copied")
 	}
+	bc.logf("✓ .git copied")
 	if err := cleanupSnapshotWorktrees(ctx, deps, dstGit, bc); err != nil {
 		return err
 	}
 	if err := cleanupSnapshotRebaseState(ctx, deps, dstGit, bc); err != nil {
 		return err
 	}
+	verifySnapshotHead(ctx, deps, repoRoot, targetPath, result, bc)
 
 	excludes, err := readDevbackIgnore(ctx, deps, repoRoot, bc)
 	if err != nil {
@@ -1161,6 +1186,62 @@ func copyRepoSnapshot(
 	}
 
 	return nil
+}
+
+// copyGitDirWithRetry copies the git dir and retries once when files vanish
+// mid-copy: git gc packs loose objects concurrently, and the object store is
+// stable again by the second pass.
+func copyGitDirWithRetry(
+	ctx context.Context,
+	deps *Dependencies,
+	srcGit,
+	dstGit string,
+	result *BackupResult,
+	bc *backupContext,
+) error {
+	before := *result
+	err := copyDirRecursive(ctx, deps, srcGit, dstGit, result, bc)
+	if ctx.Err() != nil || result.VanishedFiles == before.VanishedFiles {
+		return err
+	}
+	vanished := result.VanishedFiles - before.VanishedFiles
+	bc.logf("↻ %d file(s) vanished during .git copy (likely git gc); retrying once", vanished)
+	*result = before
+	if rmErr := deps.FileSystem.RemoveAll(ctx, dstGit); rmErr != nil {
+		return fmt.Errorf("reset .git copy for retry: %w", rmErr)
+	}
+	return copyDirRecursive(ctx, deps, srcGit, dstGit, result, bc)
+}
+
+// verifySnapshotHead confirms the snapshot object store still resolves the
+// source repo's HEAD commit: after a race with git gc the copy may hold the
+// commit neither loose nor packed.
+func verifySnapshotHead(
+	ctx context.Context,
+	deps *Dependencies,
+	repoRoot,
+	targetPath string,
+	result *BackupResult,
+	bc *backupContext,
+) {
+	hash, err := deps.Git.GetCommitHash(ctx, repoRoot)
+	hash = strings.TrimSpace(hash)
+	if err != nil || hash == "" {
+		bc.vlogf("→ Snapshot integrity check skipped (no HEAD commit)")
+		return
+	}
+	ok, err := deps.Git.ObjectExists(ctx, targetPath, hash)
+	if err == nil && ok {
+		bc.vlogf("✓ Snapshot integrity: HEAD commit present")
+		return
+	}
+	msg := fmt.Sprintf("snapshot integrity: HEAD commit %s not found in snapshot", hash)
+	if err != nil {
+		msg = fmt.Sprintf("snapshot integrity check failed: %v", err)
+	}
+	bc.warnf("%s", msg)
+	result.OtherErrors = append(result.OtherErrors, msg)
+	result.PartialSuccess = true
 }
 
 func planRepoSnapshot(

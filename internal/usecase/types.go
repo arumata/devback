@@ -95,6 +95,7 @@ type BackupResult struct {
 	CopiedFiles    int
 	SkippedFiles   int
 	SkippedDirs    int
+	VanishedFiles  int
 	PermissionErrs []string
 	OtherErrors    []string
 	PartialSuccess bool

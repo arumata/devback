@@ -17,6 +17,11 @@ Current Repository: $TMPDIR/001/test-repo
   Backup enabled:    ✗
   Backup slug:       – (not set)
   Repo key:          test-repo--HASH
+  Keep count:        30 (global)
+  Keep days:         90 (global)
+  Max total GB:      10 (global)
+  Size margin MB:    0 (global)
+  No size check:     true (global)
   Last backup:       (use --scan-backups)
   Snapshots:         (use --scan-backups)
   Size:              (use --scan-backups)

@@ -234,9 +234,10 @@ func (a *Adapter) PathSeparator() byte {
 }
 
 // IsNotExist reports whether err indicates that a path does not exist.
-// Also covers syscall.ENOTDIR (path component is not a directory).
+// Uses errors.Is so wrapped errors are recognized too; also covers
+// syscall.ENOTDIR (path component is not a directory).
 func (a *Adapter) IsNotExist(err error) bool {
-	return os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR)
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)
 }
 
 // IsExist reports whether err indicates that a path already exists.

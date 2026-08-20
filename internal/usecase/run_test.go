@@ -313,13 +313,25 @@ type mockGit struct {
 	GitDirFunc               func(ctx context.Context, repoPath string) (string, error)
 	GitCommonDirFunc         func(ctx context.Context, repoPath string) (string, error)
 	WorktreeListFunc         func(ctx context.Context, repoPath string) ([]WorktreeInfo, error)
+	ObjectExistsFunc         func(ctx context.Context, repoPath, hash string) (bool, error)
+	GetCommitHashFunc        func(ctx context.Context, repoPath string) (string, error)
 }
 
 func (m *mockGit) Init(ctx context.Context, path string) error                    { return nil }
 func (m *mockGit) Add(ctx context.Context, repoPath string, files []string) error { return nil }
 func (m *mockGit) Commit(ctx context.Context, repoPath, message string) error     { return nil }
 func (m *mockGit) GetCommitHash(ctx context.Context, repoPath string) (string, error) {
+	if m.GetCommitHashFunc != nil {
+		return m.GetCommitHashFunc(ctx, repoPath)
+	}
 	return "abc123", nil
+}
+
+func (m *mockGit) ObjectExists(ctx context.Context, repoPath, hash string) (bool, error) {
+	if m.ObjectExistsFunc != nil {
+		return m.ObjectExistsFunc(ctx, repoPath, hash)
+	}
+	return true, nil
 }
 
 func (m *mockGit) GetRemotes(ctx context.Context, repoPath string) ([]Remote, error) {

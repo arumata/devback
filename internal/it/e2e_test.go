@@ -121,6 +121,13 @@ func TestE2E(t *testing.T) {
 			FSTreeRoots: []string{"backup"},
 		},
 		{
+			Name:        "backup_override_dry_run",
+			Args:        []string{"-v", "--dry-run"},
+			ExpectError: false,
+			Setup:       setupTestRepoWithRotationOverride,
+			FSTreeRoots: []string{"backup"},
+		},
+		{
 			Name:        "test_locks",
 			Args:        []string{"--test-locks"},
 			ExpectError: false,
@@ -576,6 +583,17 @@ func setupTestRepoWithConfig(t *testing.T, env TestEnv) string {
 	cfg.Backup.MaxTotalGB = 1
 	cfg.RepoKey.Style = "name+hash"
 	writeConfig(t, env, cfg)
+	return repoPath
+}
+
+func setupTestRepoWithRotationOverride(t *testing.T, env TestEnv) string {
+	repoPath := setupTestRepoWithConfig(t, env)
+	cmd := exec.Command("git", "config", "--local", "backup.keepCount", "8")
+	cmd.Dir = repoPath
+	cmd.Env = gitEnv(env)
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
 	return repoPath
 }
 

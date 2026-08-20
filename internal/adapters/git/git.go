@@ -60,6 +60,21 @@ func (a *Adapter) GetCommitHash(ctx context.Context, repoPath string) (string, e
 	return strings.TrimSpace(string(output)), nil
 }
 
+// ObjectExists reports whether the git object exists in the repo.
+// A non-zero cat-file exit code means the object is missing, not a failure.
+func (a *Adapter) ObjectExists(ctx context.Context, repoPath, hash string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "cat-file", "-e", hash)
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // GetRemotes returns list of git remotes
 func (a *Adapter) GetRemotes(ctx context.Context, repoPath string) ([]usecase.Remote, error) {
 	cmd := exec.CommandContext(ctx, "git", "remote", "-v")

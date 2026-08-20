@@ -595,23 +595,30 @@ func TestCopySelectedFiles(t *testing.T) {
 	}
 }
 
-func TestCopySelectedFiles_LstatError(t *testing.T) {
+func TestCopySelectedFiles_LstatVanished(t *testing.T) {
 	ctx := context.Background()
 	mockFS := &mockFileSystem{
 		LstatFunc: func(ctx context.Context, path string) (FileInfo, error) {
 			return nil, os.ErrNotExist
 		},
 	}
+	result := &BackupResult{}
 	if err := copySelectedFiles(
 		ctx,
 		&Dependencies{FileSystem: mockFS},
 		[]string{"missing.txt"},
 		"/src",
 		"/dst",
-		&BackupResult{},
+		result,
 		newTestBackupContext(false),
-	); err == nil {
-		t.Fatal("expected error")
+	); err != nil {
+		t.Fatalf("vanished file must not fail copy: %v", err)
+	}
+	if result.VanishedFiles != 1 {
+		t.Fatalf("expected 1 vanished file, got %d", result.VanishedFiles)
+	}
+	if result.PartialSuccess || result.SkippedFiles != 0 {
+		t.Fatalf("vanished file must not mark partial success: %+v", result)
 	}
 }
 
@@ -1119,5 +1126,112 @@ func TestMatchDateTimeDir(t *testing.T) {
 	}
 	if matchTimeDir("24abcd") {
 		t.Fatal("expected time to not match")
+	}
+}
+
+func TestCopyGitDirWithRetry_RetriesOnceOnVanished(t *testing.T) {
+	ctx := context.Background()
+	walkCalls := 0
+	removeCalls := 0
+	mockFS := &mockFileSystem{
+		WalkFunc: func(ctx context.Context, root string, walkFn WalkFunc) error {
+			walkCalls++
+			if walkCalls == 1 {
+				return walkFn("/src/.git/objects/ab", nil, os.ErrNotExist)
+			}
+			return nil
+		},
+		RemoveAllFunc: func(ctx context.Context, path string) error {
+			removeCalls++
+			return nil
+		},
+	}
+	result := &BackupResult{}
+	err := copyGitDirWithRetry(
+		ctx,
+		&Dependencies{FileSystem: mockFS},
+		"/src/.git",
+		"/dst/.git",
+		result,
+		newTestBackupContext(false),
+	)
+	if err != nil {
+		t.Fatalf("clean retry must succeed: %v", err)
+	}
+	if walkCalls != 2 {
+		t.Fatalf("expected exactly one retry (2 walks), got %d", walkCalls)
+	}
+	if removeCalls != 1 {
+		t.Fatalf("expected dst reset before retry, got %d RemoveAll calls", removeCalls)
+	}
+	if result.VanishedFiles != 0 {
+		t.Fatalf("clean retry must reset vanished counter, got %d", result.VanishedFiles)
+	}
+}
+
+func TestCopyGitDirWithRetry_PersistentVanishedKept(t *testing.T) {
+	ctx := context.Background()
+	walkCalls := 0
+	mockFS := &mockFileSystem{
+		WalkFunc: func(ctx context.Context, root string, walkFn WalkFunc) error {
+			walkCalls++
+			return walkFn("/src/.git/objects/ab", nil, os.ErrNotExist)
+		},
+	}
+	result := &BackupResult{}
+	err := copyGitDirWithRetry(
+		ctx,
+		&Dependencies{FileSystem: mockFS},
+		"/src/.git",
+		"/dst/.git",
+		result,
+		newTestBackupContext(false),
+	)
+	if err != nil {
+		t.Fatalf("vanished-only copy must not fail: %v", err)
+	}
+	if walkCalls != 2 {
+		t.Fatalf("expected exactly one retry (2 walks), got %d", walkCalls)
+	}
+	if result.VanishedFiles != 1 {
+		t.Fatalf("expected 1 vanished file after retry, got %d", result.VanishedFiles)
+	}
+	if result.PartialSuccess {
+		t.Fatal("vanished files must not mark partial success")
+	}
+}
+
+func TestVerifySnapshotHead_MissingObject(t *testing.T) {
+	ctx := context.Background()
+	mock := &mockGit{
+		ObjectExistsFunc: func(ctx context.Context, repoPath, hash string) (bool, error) {
+			return false, nil
+		},
+	}
+	result := &BackupResult{}
+	verifySnapshotHead(ctx, &Dependencies{Git: mock}, "/repo", "/snap", result, newTestBackupContext(false))
+	if !result.PartialSuccess {
+		t.Fatal("missing HEAD object must mark partial success")
+	}
+	if len(result.OtherErrors) != 1 {
+		t.Fatalf("expected 1 integrity error, got %v", result.OtherErrors)
+	}
+}
+
+func TestVerifySnapshotHead_SkipsWithoutHead(t *testing.T) {
+	ctx := context.Background()
+	mock := &mockGit{
+		GetCommitHashFunc: func(ctx context.Context, repoPath string) (string, error) {
+			return "", errors.New("no HEAD")
+		},
+		ObjectExistsFunc: func(ctx context.Context, repoPath, hash string) (bool, error) {
+			t.Fatal("ObjectExists must not be called without HEAD")
+			return false, nil
+		},
+	}
+	result := &BackupResult{}
+	verifySnapshotHead(ctx, &Dependencies{Git: mock}, "/repo", "/snap", result, newTestBackupContext(false))
+	if result.PartialSuccess || len(result.OtherErrors) != 0 {
+		t.Fatalf("empty repo must skip integrity check: %+v", result)
 	}
 }

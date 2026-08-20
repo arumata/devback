@@ -87,6 +87,12 @@ type GitPort interface {
 	// ConfigSetGlobal sets global git config value
 	ConfigSetGlobal(ctx context.Context, key, value string) error
 
+	// GetCommitHash returns the HEAD commit hash of the repo
+	GetCommitHash(ctx context.Context, repoPath string) (string, error)
+
+	// ObjectExists reports whether the git object exists in the repo
+	ObjectExists(ctx context.Context, repoPath, hash string) (bool, error)
+
 	// GitDir returns the git directory for the repo
 	GitDir(ctx context.Context, repoPath string) (string, error)
 

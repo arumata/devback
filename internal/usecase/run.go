@@ -189,8 +189,6 @@ func Backup(ctx context.Context, cfg *Config, deps *Dependencies, logger *slog.L
 		return nil, err
 	}
 
-	printConfig(cfg, bc)
-
 	repoRoot, err := resolveRepoRoot(ctx, deps)
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to resolve repository root", "error", err)
@@ -201,6 +199,13 @@ func Backup(ctx context.Context, cfg *Config, deps *Dependencies, logger *slog.L
 		logger.ErrorContext(ctx, "Not a git repository", "error", err)
 		return nil, fmt.Errorf("not a git repository: %w", ErrCritical)
 	}
+
+	if err := ApplyRepoRotationOverrides(ctx, deps, cfg, repoRoot, bc); err != nil {
+		logger.ErrorContext(ctx, "Invalid repo backup override", "error", err)
+		return nil, err
+	}
+
+	printConfig(cfg, bc)
 
 	repoKey := deriveRepoKey(ctx, cfg, deps, repoRoot, bc)
 

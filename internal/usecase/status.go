@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -91,7 +92,18 @@ type StatusRepo struct {
 	BackupEnabled bool
 	BackupSlug    string
 	RepoKey       string
+	Rotation      []StatusRotationSetting
 	Backups       StatusBackups
+}
+
+// StatusRotationSetting describes one effective rotation setting: either the
+// global TOML value or a repo-level git config override.
+type StatusRotationSetting struct {
+	Key      string
+	Label    string
+	Value    string
+	Override bool
+	Invalid  bool
 }
 
 // StatusHooks contains hook checks summary.
@@ -323,6 +335,7 @@ func buildStatusRepo(
 	backupSlug := readRepoConfig(ctx, deps.Git, repo.repoRoot, repo.isWorktree, "backup.slug")
 	backupEnabled := parseBoolValue(readRepoConfig(ctx, deps.Git, repo.repoRoot, repo.isWorktree, "backup.enabled"))
 	repoKey := deriveRepoKeyStatus(ctx, cfg, deps, repo.repoRoot, backupSlug, logger)
+	rotation := buildRotationStatus(ctx, deps.Git, cfg, repo.repoRoot, repo.isWorktree)
 
 	backups := StatusBackups{}
 	if scanBackupsFlag {
@@ -357,6 +370,7 @@ func buildStatusRepo(
 		BackupEnabled: backupEnabled,
 		BackupSlug:    backupSlug,
 		RepoKey:       repoKey,
+		Rotation:      rotation,
 		Backups:       backups,
 	}
 	return repoStatus, worktrees, nil
@@ -458,6 +472,9 @@ func FormatStatus(report StatusReport, useColor bool) string {
 	appendStatusLine(&b, "Backup enabled:", formatBoolStatus(report.Repo.BackupEnabled, p))
 	appendStatusLine(&b, "Backup slug:", formatTextValue(report.Repo.BackupSlug, p))
 	appendStatusLine(&b, "Repo key:", formatTextValue(report.Repo.RepoKey, p))
+	for _, rt := range report.Repo.Rotation {
+		appendStatusLine(&b, rt.Label, formatRotationStatus(rt, p))
+	}
 
 	if report.Repo.Backups.Scanned {
 		appendStatusLine(&b, "Last backup:", formatBackupTime(report.Repo.Backups.LastBackup, p))
@@ -633,6 +650,50 @@ func readRepoConfig(ctx context.Context, git GitPort, repoRoot string, preferWor
 	return ""
 }
 
+// buildRotationStatus resolves the effective rotation settings: repo-level
+// git config overrides win over global TOML values; invalid override values
+// are surfaced instead of silently falling back.
+func buildRotationStatus(
+	ctx context.Context,
+	git GitPort,
+	cfg ConfigFile,
+	repoRoot string,
+	isWorktree bool,
+) []StatusRotationSetting {
+	settings := []struct {
+		key    string
+		label  string
+		global string
+		isBool bool
+	}{
+		{gitKeyKeepCount, "Keep count:", strconv.Itoa(cfg.Backup.KeepCount), false},
+		{gitKeyKeepDays, "Keep days:", strconv.Itoa(cfg.Backup.KeepDays), false},
+		{gitKeyMaxTotalGb, "Max total GB:", strconv.Itoa(cfg.Backup.MaxTotalGB), false},
+		{gitKeySizeMarginMb, "Size margin MB:", strconv.Itoa(cfg.Backup.SizeMarginMB), false},
+		{gitKeyNoSize, "No size check:", strconv.FormatBool(cfg.Backup.NoSize), true},
+	}
+	out := make([]StatusRotationSetting, 0, len(settings))
+	for _, s := range settings {
+		item := StatusRotationSetting{Key: s.key, Label: s.label, Value: s.global}
+		if raw := readRepoConfig(ctx, git, repoRoot, isWorktree, s.key); raw != "" {
+			item.Override = true
+			item.Value = raw
+			item.Invalid = rotationValueInvalid(raw, s.isBool)
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func rotationValueInvalid(raw string, isBool bool) bool {
+	if isBool {
+		_, err := parseRotationBool(raw)
+		return err != nil
+	}
+	_, err := parseRotationInt(raw)
+	return err != nil
+}
+
 func parseBoolValue(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "1", "true", "yes", "on":
@@ -795,6 +856,17 @@ func formatBoolStatus(value bool, p statusPalette) string {
 		return fmt.Sprintf("%s✓%s", p.green, p.reset)
 	}
 	return fmt.Sprintf("%s✗%s", p.red, p.reset)
+}
+
+func formatRotationStatus(rt StatusRotationSetting, p statusPalette) string {
+	if rt.Invalid {
+		return fmt.Sprintf("%s %s(repo override, invalid)%s", rt.Value, p.red, p.reset)
+	}
+	source := "global"
+	if rt.Override {
+		source = "repo override"
+	}
+	return fmt.Sprintf("%s %s(%s)%s", rt.Value, p.dim, source, p.reset)
 }
 
 func formatTextValue(value string, p statusPalette) string {
