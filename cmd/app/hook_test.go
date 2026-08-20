@@ -190,18 +190,23 @@ func TestIsRebaseInProgress(t *testing.T) {
 	cases := []struct {
 		name  string
 		paths []string
+		isDir bool
 		want  bool
 	}{
-		{"no rebase", nil, false},
-		{"rebase-merge", []string{filepath.Join(gitDir, "rebase-merge")}, true},
-		{"rebase-apply", []string{filepath.Join(gitDir, "rebase-apply")}, true},
-		{"rebase-head", []string{filepath.Join(gitDir, "REBASE_HEAD")}, true},
+		{"no rebase", nil, false, false},
+		{"rebase-merge", []string{filepath.Join(gitDir, "rebase-merge")}, true, true},
+		{"rebase-apply", []string{filepath.Join(gitDir, "rebase-apply")}, true, true},
+		// Stale REBASE_HEAD survives finished/aborted rebases and must not
+		// count as an active rebase (it used to silently disable backups).
+		{"stale rebase-head", []string{filepath.Join(gitDir, "REBASE_HEAD")}, false, false},
+		// Only the state *dirs* mark a rebase; a stray regular file does not.
+		{"regular file rebase-merge", []string{filepath.Join(gitDir, "rebase-merge")}, false, false},
 	}
 
 	for _, tc := range cases {
 		files := make(map[string]mockFileInfo)
 		for _, path := range tc.paths {
-			files[path] = mockFileInfo{name: filepath.Base(path)}
+			files[path] = mockFileInfo{name: filepath.Base(path), isDir: tc.isDir}
 		}
 		fs := &mockFileSystem{files: files}
 		got, err := isRebaseInProgress(ctx, fs, gitDir)
@@ -229,15 +234,24 @@ func TestIsDebounceActive(t *testing.T) {
 	now := time.Date(2026, 2, 6, 12, 0, 0, 0, time.UTC)
 	stampPath := filepath.Join("repo", ".git", stampFileName)
 
+	recent := strconv.FormatInt(now.Add(-30*time.Second).Unix(), 10)
 	cases := []struct {
-		name string
-		data []byte
-		want bool
+		name    string
+		data    []byte
+		headSha string
+		want    bool
 	}{
-		{"missing", nil, false},
-		{"invalid", []byte("oops"), false},
-		{"old", []byte("0"), false},
-		{"recent", []byte(strconv.FormatInt(now.Add(-30*time.Second).Unix(), 10)), true},
+		{"missing", nil, "", false},
+		{"invalid", []byte("oops"), "", false},
+		{"old", []byte("0"), "", false},
+		{"recent", []byte(recent), "", true},
+		// Sha-aware: a stamp left by a different HEAD must not debounce,
+		// otherwise the second rebase within the window loses its snapshot.
+		{"recent same sha", []byte(recent + " abc123"), "abc123", true},
+		{"recent different sha", []byte(recent + " abc123"), "def456", false},
+		{"recent stamp without sha", []byte(recent), "abc123", true},
+		{"recent sha unknown head", []byte(recent + " abc123"), "", true},
+		{"old same sha", []byte("0 abc123"), "abc123", false},
 	}
 
 	for _, tc := range cases {
@@ -245,7 +259,7 @@ func TestIsDebounceActive(t *testing.T) {
 		if tc.data != nil {
 			fs.reads[stampPath] = tc.data
 		}
-		got, err := isDebounceActive(context.Background(), fs, stampPath, now)
+		got, err := isDebounceActive(context.Background(), fs, stampPath, now, tc.headSha)
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", tc.name, err)
 		}

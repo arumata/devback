@@ -30,8 +30,9 @@ func newHookPostRewriteCmd(
 		Short: "Backup after rewrite (rebase/amend)",
 		Long: `Run backup after rebase or amend.
 
-For rebase: uses debounce (60s) to run backup only once.
-For amend: runs backup immediately.`,
+Deduplicates via a sha-aware debounce (60s): a backup already taken for the
+same HEAD (e.g. by post-commit during git commit --amend) is not repeated,
+while a new HEAD within the window still gets its own snapshot.`,
 		Args: cobra.ExactArgs(1),
 		ValidArgsFunction: func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
 			if len(args) == 0 {
@@ -45,11 +46,13 @@ For amend: runs backup immediately.`,
 	}
 }
 
+// The rewrite command (rebase/amend) stays in the CLI contract but no longer
+// branches the logic: both paths share the sha-aware debounce below.
 func runHookPostRewrite(
 	ctx context.Context,
 	hookCfg *hookConfig,
 	depsFactory func(*slog.Logger) *usecase.Dependencies,
-	command string,
+	_ string,
 ) int {
 	preflight, ok := runHookPreflight(ctx, hookCfg, depsFactory)
 	if !ok || preflight == nil {
@@ -60,28 +63,24 @@ func runHookPostRewrite(
 		return exitSuccess
 	}
 
-	command = strings.ToLower(strings.TrimSpace(command))
-	isRebase := command == "rebase"
-
+	// No isRebaseInProgress guard here: git invokes post-rewrite when the
+	// rewrite has already happened, while the rebase state dir is still on
+	// disk — the guard made this path unreachable and a completed rebase
+	// produced no snapshot at all. The debounce stamp deduplicates repeated
+	// invocations instead, and it applies to amend as well: `git commit
+	// --amend` fires post-commit first, whose backup already covers the
+	// exact HEAD this hook sees. A stamp left by a different HEAD does not
+	// debounce (see isDebounceActive), so a genuinely new rewrite within
+	// the window is still backed up.
 	stampPath := resolveStampPath(ctx, preflight)
-	if isRebase {
-		inRebase, err := isRebaseInProgress(ctx, preflight.deps.FileSystem, preflight.gitDir)
-		if err != nil {
-			return exitSuccess
-		}
-		if inRebase {
-			logHookSkip(preflight.logger, "SKIP_REBASE_IN_PROGRESS")
-			return exitSuccess
-		}
-
-		debounce, err := isDebounceActive(ctx, preflight.deps.FileSystem, stampPath, time.Now())
-		if err != nil {
-			preflight.logger.Debug("failed to read debounce stamp", "error", err)
-		}
-		if debounce {
-			logHookSkip(preflight.logger, "SKIP_DEBOUNCE")
-			return exitSuccess
-		}
+	headSha := readHeadSha(ctx, preflight)
+	debounce, err := isDebounceActive(ctx, preflight.deps.FileSystem, stampPath, time.Now(), headSha)
+	if err != nil {
+		preflight.logger.Debug("failed to read debounce stamp", "error", err)
+	}
+	if debounce {
+		logBackupSkipped(preflight, "post-rewrite", "SKIP_DEBOUNCE")
+		return exitSuccess
 	}
 
 	return runPostRewriteBackup(ctx, hookCfg, preflight, stampPath)
@@ -114,7 +113,7 @@ func runPostRewriteBackup(
 	result, err := usecase.Backup(ctx, cfg, preflight.deps, preflight.logger)
 	if err != nil {
 		if errors.Is(err, usecase.ErrLockBusy) {
-			logHookSkip(preflight.logger, "SKIP_LOCK_BUSY")
+			logBackupSkipped(preflight, "post-rewrite", "SKIP_LOCK_BUSY")
 			return exitSuccess
 		}
 		if errors.Is(err, usecase.ErrInterrupted) || errors.Is(err, context.Canceled) {
@@ -147,7 +146,18 @@ func resolveStampPath(ctx context.Context, preflight *hookPreflight) string {
 	return preflight.deps.FileSystem.Join(preflight.gitDir, stampFileName)
 }
 
-func isDebounceActive(ctx context.Context, fs usecase.FileSystemPort, stampPath string, now time.Time) (bool, error) {
+// isDebounceActive reports whether a recent backup already covers the current
+// state. The stamp is "unix-timestamp[ head-sha]"; the sha makes the debounce
+// state-aware — a stamp left by a different HEAD never debounces, so two
+// rebases within the window still produce two snapshots. When either sha is
+// unknown the check degrades to time-only.
+func isDebounceActive(
+	ctx context.Context,
+	fs usecase.FileSystemPort,
+	stampPath string,
+	now time.Time,
+	headSha string,
+) (bool, error) {
 	if fs == nil || strings.TrimSpace(stampPath) == "" {
 		return false, nil
 	}
@@ -158,16 +168,21 @@ func isDebounceActive(ctx context.Context, fs usecase.FileSystemPort, stampPath 
 		}
 		return false, err
 	}
-	stampValue := strings.TrimSpace(string(data))
-	if stampValue == "" {
+	fields := strings.Fields(string(data))
+	if len(fields) == 0 {
 		return false, nil
 	}
-	ts, err := strconv.ParseInt(stampValue, 10, 64)
+	ts, err := strconv.ParseInt(fields[0], 10, 64)
 	if err != nil {
 		return false, nil
 	}
-	stampTime := time.Unix(ts, 0)
-	return now.Sub(stampTime) < debounceTimeout, nil
+	if now.Sub(time.Unix(ts, 0)) >= debounceTimeout {
+		return false, nil
+	}
+	if len(fields) > 1 && headSha != "" && fields[1] != headSha {
+		return false, nil
+	}
+	return true, nil
 }
 
 func updateStampWithLog(ctx context.Context, preflight *hookPreflight, stampPath string) {
@@ -177,12 +192,12 @@ func updateStampWithLog(ctx context.Context, preflight *hookPreflight, stampPath
 	if strings.TrimSpace(stampPath) == "" {
 		return
 	}
-	if err := updateStamp(ctx, preflight.deps.FileSystem, stampPath); err != nil {
+	if err := updateStamp(ctx, preflight.deps.FileSystem, stampPath, readHeadSha(ctx, preflight)); err != nil {
 		preflight.logger.Debug("failed to update debounce stamp", "error", err)
 	}
 }
 
-func updateStamp(ctx context.Context, fs usecase.FileSystemPort, stampPath string) error {
+func updateStamp(ctx context.Context, fs usecase.FileSystemPort, stampPath, headSha string) error {
 	if fs == nil {
 		return errors.New("filesystem dependency is missing")
 	}
@@ -194,8 +209,11 @@ func updateStamp(ctx context.Context, fs usecase.FileSystemPort, stampPath strin
 	}
 
 	tmpPath := stampPath + ".tmp"
-	timestamp := fmt.Sprintf("%d", time.Now().Unix())
-	if err := fs.WriteFile(ctx, tmpPath, []byte(timestamp), 0o644); err != nil {
+	stamp := fmt.Sprintf("%d", time.Now().Unix())
+	if headSha != "" {
+		stamp += " " + headSha
+	}
+	if err := fs.WriteFile(ctx, tmpPath, []byte(stamp), 0o644); err != nil {
 		return err
 	}
 	return fs.Move(ctx, tmpPath, stampPath)

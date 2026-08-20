@@ -101,7 +101,7 @@ devback status
 ```
 
 After `setup`, hooks automatically trigger a backup after `git commit`, `git merge`,
-and `git rebase --rebase-merges`/`git commit --amend` (via `post-rewrite`).
+and `git rebase`/`git commit --amend` (via `post-rewrite`).
 To run hook commands manually:
 
 ```bash
@@ -109,6 +109,28 @@ devback hook post-commit
 devback hook post-merge
 devback hook post-rewrite rebase
 ```
+
+#### Diagnostics: why was my backup skipped
+
+When a hook decides not to back up an enrolled repository, the reason is
+written to the file log (`~/.local/state/devback/logs/devback-YYYY-MM-DD.log`)
+as a `skip hook` record with `hook`, `repo`, and `reason` attributes (info
+level, independent of `logging.level`); nothing is printed to the terminal
+during normal git operations. Reason codes:
+
+| Reason | Meaning |
+|--------|---------|
+| `SKIP_REBASE_IN_PROGRESS` | A rebase is running (`.git/rebase-merge`/`rebase-apply`); `post-rewrite` backs up when it finishes |
+| `SKIP_REBASE_REFLOG` | `post-commit` fired inside a rebase (`GIT_REFLOG_ACTION`) |
+| `SKIP_REBASE_STATE_UNREADABLE` | The rebase state in `.git` could not be read |
+| `SKIP_DEBOUNCE` | A backup of this same HEAD was already taken within the last 60 seconds (e.g. by `post-commit` during `git commit --amend`); a new HEAD within the window still gets backed up |
+| `SKIP_LOCK_BUSY` | A backup of this repository is already running |
+| `SKIP_INTERRUPTED` | The backup was interrupted by a signal |
+
+Configuration problems in an enrolled repository (`SKIP_CONFIG_ERROR`,
+`SKIP_NO_CONFIG`, `SKIP_NO_BASEDIR`, `SKIP_NO_HOMEDIR`) are printed as
+warnings to stderr on every commit — the file log is not available at that
+point. In repositories without `backup.enabled`, hooks stay silent.
 
 To run a backup manually:
 

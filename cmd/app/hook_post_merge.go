@@ -46,12 +46,14 @@ func runHookPostMerge(
 
 	inRebase, err := isRebaseInProgress(ctx, preflight.deps.FileSystem, preflight.gitDir)
 	if err != nil {
+		logBackupSkipped(preflight, "post-merge", "SKIP_REBASE_STATE_UNREADABLE")
+		preflight.logger.Debug("rebase detection failed", "error", err, "git_dir", preflight.gitDir)
 		return exitSuccess
 	}
 	if inRebase {
-		logHookSkip(preflight.logger, "SKIP_REBASE_IN_PROGRESS")
+		logBackupSkipped(preflight, "post-merge", "SKIP_REBASE_IN_PROGRESS")
 		return exitSuccess
 	}
 
-	return runBackupWithNotify(ctx, hookCfg, preflight)
+	return runBackupWithNotify(ctx, hookCfg, preflight, "post-merge")
 }

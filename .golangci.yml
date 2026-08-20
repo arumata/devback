@@ -19,15 +19,15 @@ linters:
     - lll
     - depguard
     - gochecknoglobals
-    - godox          # запрет TODO/FIXME/HACK
+    - godox          # forbid TODO/FIXME/HACK
     - unused
     - ineffassign
     - unparam
     - gocritic
-    - gosec          # безопасность
-    - unconvert      # ненужные конверсии
-    - dupl           # дублирование кода
-    - prealloc       # предаллокация слайсов
+    - gosec          # security checks
+    - unconvert      # unnecessary conversions
+    - dupl           # code duplication
+    - prealloc       # slice preallocation
   settings:
     gocyclo:
       min-complexity: 15
@@ -40,7 +40,7 @@ linters:
       threshold: 100
     gosec:
       excludes:
-        - G204  # разрешаем subprocess с переменными (для git команд)
+        - G204  # allow subprocess with variables (git commands)
     prealloc:
       simple: true
       range-loops: true
@@ -49,7 +49,7 @@ linters:
         - name: exported
     depguard:
       rules:
-        # Запрет прямых системных вызовов в usecase слое
+        # Forbid direct system calls in the usecase layer
         usecase-restrictions:
           files:
             - "**/internal/usecase/*.go"
@@ -57,15 +57,15 @@ linters:
             - "!$test"
           deny:
             - pkg: os
-              desc: "В usecase запрещены прямые системные вызовы. Используйте адаптеры."
+              desc: "Direct system calls are forbidden in usecase. Use adapters."
             - pkg: os/exec
-              desc: "В usecase запрещен os/exec. Используйте git-adapter."
+              desc: "os/exec is forbidden in usecase. Use the git adapter."
             - pkg: path/filepath
-              desc: "В usecase запрещен path/filepath. Используйте fs-adapter."
+              desc: "path/filepath is forbidden in usecase. Use the fs adapter."
             - pkg: syscall
-              desc: "В usecase запрещены прямые syscall. Используйте адаптеры."
+              desc: "Direct syscalls are forbidden in usecase. Use adapters."
           include-go-root: true
-        # Ограничение os/exec: допустим только в адаптерах
+        # Restrict os/exec to adapters only
         exec-restrictions:
           files:
             - "**/internal/*.go"
@@ -75,7 +75,7 @@ linters:
             - "!$test"
           deny:
             - pkg: os/exec
-              desc: "os/exec допустим только в internal/adapters/*"
+              desc: "os/exec is allowed only in internal/adapters/*"
           include-go-root: true
 
 formatters:
@@ -100,16 +100,16 @@ formatters:
 issues:
   exclude-use-default: false
   exclude-rules:
-    # В тестах допускаем длинные строки и цикломатику
+    # Tests may have long lines and higher cyclomatic complexity
     - path: _test\.go
       linters:
         - gocyclo
         - lll
-    # Разрешаем TODO в тестах (но не в коде, который попадает в сборку)
+    # Allow TODO in tests (but not in shipped code)
     - path: _test\.go
       linters:
         - godox
-    # В тестах допускаем менее строгие права доступа и файловые операции
+    # Tests may use relaxed permissions and file operations
     - path: _test\.go
       linters:
         - gosec

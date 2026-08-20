@@ -34,6 +34,50 @@ func TestHookPostCommit_RebaseInProgress(t *testing.T) {
 	}
 }
 
+func TestHookPostCommit_StaleRebaseHead(t *testing.T) {
+	env, repoPath, backupBase, repoKey := setupHookEnv(t)
+	commitFile(t, env, repoPath, "stale.txt", "stale", "stale")
+
+	// REBASE_HEAD left behind by a finished rebase must not block backups —
+	// it used to silently disable them until the file was removed by hand.
+	if err := os.WriteFile(filepath.Join(repoPath, ".git", "REBASE_HEAD"), []byte("deadbeef\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	runHook(t, env, repoPath, []string{"hook", "post-commit"})
+
+	if got := countSnapshots(t, backupBase, repoKey); got != 1 {
+		t.Fatalf("stale REBASE_HEAD must not block backup, got %d snapshots", got)
+	}
+}
+
+func TestHookPostRewrite_RebaseStateDirStillPresent(t *testing.T) {
+	env, repoPath, backupBase, repoKey := setupHookEnv(t)
+
+	// Git calls post-rewrite while .git/rebase-merge still exists; the hook
+	// must back up anyway, otherwise a completed rebase leaves no snapshot.
+	rebaseDir := filepath.Join(repoPath, ".git", "rebase-merge")
+	if err := os.MkdirAll(rebaseDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	runHook(t, env, repoPath, []string{"hook", "post-rewrite", "rebase"})
+
+	if got := countSnapshots(t, backupBase, repoKey); got != 1 {
+		t.Fatalf("expected 1 snapshot after post-rewrite during rebase state, got %d", got)
+	}
+
+	// The snapshot's .git must not carry the transient rebase state: a repo
+	// restored from it would otherwise report itself mid-rebase.
+	matches, err := filepath.Glob(filepath.Join(backupBase, repoKey, "*", "*", ".git", "rebase-merge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("snapshot must not contain .git/rebase-merge, found %v", matches)
+	}
+}
+
 func TestHookPostCommit_Disabled(t *testing.T) {
 	env, repoPath, backupBase, repoKey := setupHookEnv(t)
 	setBackupEnabled(t, env, repoPath, "false")
@@ -72,6 +116,38 @@ func TestHookPostRewrite_RebaseDebounce(t *testing.T) {
 	runHook(t, env, repoPath, []string{"hook", "post-rewrite", "rebase"})
 	if got := countSnapshots(t, backupBase, repoKey); got != 1 {
 		t.Fatalf("expected debounce to keep 1 snapshot, got %d", got)
+	}
+}
+
+func TestHookPostRewrite_NewHeadWithinDebounceWindow(t *testing.T) {
+	env, repoPath, backupBase, repoKey := setupHookEnv(t)
+
+	runHook(t, env, repoPath, []string{"hook", "post-rewrite", "rebase"})
+	if got := countSnapshots(t, backupBase, repoKey); got != 1 {
+		t.Fatalf("expected 1 snapshot after first hook, got %d", got)
+	}
+
+	// A different HEAD within the 60s window is a genuinely new state and
+	// must produce a snapshot — the debounce is sha-aware, not time-only.
+	commitFile(t, env, repoPath, "next.txt", "next", "next")
+	runHook(t, env, repoPath, []string{"hook", "post-rewrite", "rebase"})
+	if got := countSnapshots(t, backupBase, repoKey); got != 2 {
+		t.Fatalf("expected 2 snapshots after HEAD moved, got %d", got)
+	}
+}
+
+func TestHookAmend_SingleSnapshot(t *testing.T) {
+	env, repoPath, backupBase, repoKey := setupHookEnv(t)
+	commitFile(t, env, repoPath, "amend.txt", "amend", "amend")
+	runGit(t, env, repoPath, "commit", "--amend", "-m", "amended")
+
+	// git commit --amend fires post-commit first, then post-rewrite amend;
+	// the pair must produce one snapshot, not two.
+	runHook(t, env, repoPath, []string{"hook", "post-commit"})
+	runHook(t, env, repoPath, []string{"hook", "post-rewrite", "amend"})
+
+	if got := countSnapshots(t, backupBase, repoKey); got != 1 {
+		t.Fatalf("expected 1 snapshot for the amend pair, got %d", got)
 	}
 }
 

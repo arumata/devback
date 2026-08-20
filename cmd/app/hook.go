@@ -20,13 +20,15 @@ type hookConfig struct {
 }
 
 type hookPreflight struct {
-	deps       *usecase.Dependencies
-	logger     *slog.Logger
-	repoRoot   string
-	gitDir     string
-	configFile usecase.ConfigFile
-	runtimeCfg *usecase.Config
-	cleanup    func()
+	deps          *usecase.Dependencies
+	logger        *slog.Logger
+	skipLogger    *slog.Logger // file-only, pinned to info: skip reasons must reach the log without touching the terminal
+	consoleLogger *slog.Logger // stderr-only, for --verbose echoes that must not duplicate into the file
+	repoRoot      string
+	gitDir        string
+	configFile    usecase.ConfigFile
+	runtimeCfg    *usecase.Config
+	cleanup       func()
 }
 
 func newHookCmd(depsFactory func(*slog.Logger) *usecase.Dependencies, exitCode *int) *cobra.Command {
@@ -75,46 +77,55 @@ func runHookPreflight(
 		return nil, false
 	}
 
+	// Past this point the repo is enrolled: a skipped backup is a real loss
+	// of protection, so failures must be visible. The file logger is not
+	// attached yet, so warn to stderr — a broken config deserves one line
+	// per commit until it is fixed.
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
+		logger.Warn("skip hook", "reason", "SKIP_NO_HOMEDIR", "repo", repoRoot, "error", err)
 		return nil, false
 	}
 
 	configFile, configExists, err := loadConfigFile(ctx, deps, homeDir)
 	if err != nil {
+		logger.Warn("skip hook", "reason", "SKIP_CONFIG_ERROR", "repo", repoRoot, "error", err)
 		return nil, false
 	}
 	if !configExists {
-		logHookSkip(logger, "SKIP_NO_CONFIG")
+		logger.Warn("skip hook", "reason", "SKIP_NO_CONFIG", "repo", repoRoot)
 		return nil, false
 	}
 
 	runtimeCfg, err := usecase.RuntimeConfigFromFile(configFile, homeDir)
 	if err != nil {
+		logger.Warn("skip hook", "reason", "SKIP_CONFIG_ERROR", "repo", repoRoot, "error", err)
 		return nil, false
 	}
 	if strings.TrimSpace(runtimeCfg.BackupDir) == "" {
-		logHookSkip(logger, "SKIP_NO_BASEDIR")
+		logger.Warn("skip hook", "reason", "SKIP_NO_BASEDIR", "repo", repoRoot)
 		return nil, false
 	}
 
 	gitDir, err := deps.Git.GitDir(ctx, repoRoot)
 	if err != nil {
-		logHookSkip(logger, "SKIP_NOT_GIT_REPO")
+		logger.Warn("skip hook", "reason", "SKIP_NOT_GIT_REPO", "repo", repoRoot, "error", err)
 		return nil, false
 	}
 	gitDir = normalizeGitDir(repoRoot, gitDir)
 
-	fileLogger, cleanup := withFileLogging(logger, configFile.Logging, cfg.verbose)
+	fileLogger, fileOnly, cleanup := withFileLogging(logger, configFile.Logging, cfg.verbose)
 
 	return &hookPreflight{
-		deps:       deps,
-		logger:     fileLogger,
-		repoRoot:   repoRoot,
-		gitDir:     gitDir,
-		configFile: configFile,
-		runtimeCfg: runtimeCfg,
-		cleanup:    cleanup,
+		deps:          deps,
+		logger:        fileLogger,
+		skipLogger:    fileOnly.With("repo", repoRoot),
+		consoleLogger: logger,
+		repoRoot:      repoRoot,
+		gitDir:        gitDir,
+		configFile:    configFile,
+		runtimeCfg:    runtimeCfg,
+		cleanup:       cleanup,
 	}, true
 }
 
@@ -165,6 +176,10 @@ func normalizeGitDir(repoRoot, gitDir string) string {
 	return filepath.Clean(filepath.Join(repoRoot, gitDir))
 }
 
+// logHookSkip records skips that happen before enrollment is known
+// (not a git repo, backup.enabled unset): these fire on every commit in
+// repos where devback is not enabled, so debug keeps the console quiet.
+// Enrolled-repo skips go through logBackupSkipped instead.
 func logHookSkip(logger *slog.Logger, reason string) {
 	if logger == nil {
 		return
@@ -172,7 +187,65 @@ func logHookSkip(logger *slog.Logger, reason string) {
 	logger.Debug("skip hook", "reason", reason)
 }
 
-// isRebaseInProgress checks for rebase state files/dirs.
+// logBackupSkipped records a skipped backup in an enrolled repo: the reason
+// goes to the file log (info, with hook and repo attributes) so a repo that
+// silently stopped being backed up can be diagnosed, and to the console only
+// at debug so git output stays clean unless --verbose is given. The console
+// echo uses the stderr-only logger, otherwise --verbose would write the same
+// skip into the file twice.
+func logBackupSkipped(p *hookPreflight, hook, reason string) {
+	if p == nil {
+		return
+	}
+	if p.skipLogger != nil {
+		p.skipLogger.Info("skip hook", "hook", hook, "reason", reason)
+	}
+	if p.consoleLogger != nil {
+		p.consoleLogger.Debug("skip hook", "hook", hook, "reason", reason)
+	}
+}
+
+// readHeadSha resolves the current HEAD commit sha via the filesystem port:
+// gitDir/HEAD directly for a detached head, or the loose ref file under the
+// common dir for a symbolic one. Returns "" when it cannot tell (e.g. the
+// ref is packed) — callers must degrade gracefully.
+func readHeadSha(ctx context.Context, p *hookPreflight) string {
+	if p == nil || p.deps == nil || p.deps.FileSystem == nil || strings.TrimSpace(p.gitDir) == "" {
+		return ""
+	}
+	fs := p.deps.FileSystem
+	data, err := fs.ReadFile(ctx, fs.Join(p.gitDir, "HEAD"))
+	if err != nil {
+		return ""
+	}
+	head := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(head, "ref:") {
+		return head
+	}
+	refPath := strings.TrimSpace(strings.TrimPrefix(head, "ref:"))
+	if refPath == "" {
+		return ""
+	}
+	refDir := p.gitDir
+	if p.deps.Git != nil {
+		if commonDir, err := p.deps.Git.GitCommonDir(ctx, p.repoRoot); err == nil {
+			if normalized := normalizeGitDir(p.repoRoot, commonDir); strings.TrimSpace(normalized) != "" {
+				refDir = normalized
+			}
+		}
+	}
+	data, err = fs.ReadFile(ctx, fs.Join(refDir, refPath))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// isRebaseInProgress checks for the rebase state dirs rebase-merge and
+// rebase-apply. A regular file with those names does not count, and
+// REBASE_HEAD is deliberately ignored — git can leave it behind after a
+// finished or aborted rebase, and treating it as active silently disabled
+// backups until it was removed by hand.
 func isRebaseInProgress(ctx context.Context, fs usecase.FileSystemPort, gitDir string) (bool, error) {
 	if fs == nil {
 		return false, errors.New("filesystem dependency is missing")
@@ -183,9 +256,8 @@ func isRebaseInProgress(ctx context.Context, fs usecase.FileSystemPort, gitDir s
 
 	rebaseMerge := fs.Join(gitDir, "rebase-merge")
 	rebaseApply := fs.Join(gitDir, "rebase-apply")
-	rebaseHead := fs.Join(gitDir, "REBASE_HEAD")
 
-	exists, err := hookPathExists(ctx, fs, rebaseMerge)
+	exists, err := hookDirExists(ctx, fs, rebaseMerge)
 	if err != nil {
 		return false, err
 	}
@@ -193,22 +265,10 @@ func isRebaseInProgress(ctx context.Context, fs usecase.FileSystemPort, gitDir s
 		return true, nil
 	}
 
-	exists, err = hookPathExists(ctx, fs, rebaseApply)
-	if err != nil {
-		return false, err
-	}
-	if exists {
-		return true, nil
-	}
-
-	exists, err = hookPathExists(ctx, fs, rebaseHead)
-	if err != nil {
-		return false, err
-	}
-	return exists, nil
+	return hookDirExists(ctx, fs, rebaseApply)
 }
 
-func hookPathExists(ctx context.Context, fs usecase.FileSystemPort, path string) (bool, error) {
+func hookDirExists(ctx context.Context, fs usecase.FileSystemPort, path string) (bool, error) {
 	info, err := fs.Stat(ctx, path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -219,5 +279,5 @@ func hookPathExists(ctx context.Context, fs usecase.FileSystemPort, path string)
 	if info == nil {
 		return false, nil
 	}
-	return true, nil
+	return info.IsDir(), nil
 }

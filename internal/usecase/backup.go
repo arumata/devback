@@ -181,6 +181,29 @@ func resolveSnapshotGitDirs(ctx context.Context, deps *Dependencies, repoRoot st
 	}, nil
 }
 
+// cleanupSnapshotRebaseState removes transient rebase/merge state from the
+// snapshot's .git copy. Hooks legitimately run while this state is still on
+// disk (post-rewrite fires before git removes rebase-merge), but a restored
+// repo carrying it reports itself mid-rebase and demands `git rebase --quit`.
+// Only the copy is touched, never the source repository.
+func cleanupSnapshotRebaseState(ctx context.Context, deps *Dependencies, dstGit string, bc *backupContext) error {
+	transient := []string{"rebase-merge", "rebase-apply", "REBASE_HEAD", "CHERRY_PICK_HEAD", "MERGE_HEAD", "MERGE_MSG"}
+	for _, name := range transient {
+		path := deps.FileSystem.Join(dstGit, name)
+		if _, err := deps.FileSystem.Stat(ctx, path); err != nil {
+			if deps.FileSystem.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("stat %s: %w", name, err)
+		}
+		if err := deps.FileSystem.RemoveAll(ctx, path); err != nil {
+			return fmt.Errorf("remove %s: %w", name, err)
+		}
+		bc.vlogf("→ Removed .git/%s from snapshot", name)
+	}
+	return nil
+}
+
 func cleanupSnapshotWorktrees(ctx context.Context, deps *Dependencies, dstGit string, bc *backupContext) error {
 	worktreesDir := deps.FileSystem.Join(dstGit, "worktrees")
 	info, err := deps.FileSystem.Stat(ctx, worktreesDir)
@@ -1095,6 +1118,9 @@ func copyRepoSnapshot(
 		bc.logf("✓ .git copied")
 	}
 	if err := cleanupSnapshotWorktrees(ctx, deps, dstGit, bc); err != nil {
+		return err
+	}
+	if err := cleanupSnapshotRebaseState(ctx, deps, dstGit, bc); err != nil {
 		return err
 	}
 

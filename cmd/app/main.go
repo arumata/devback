@@ -108,7 +108,7 @@ func runRootCommand(
 	if state.configExists {
 		applyBackupConfig(cfg, state.backupCfg)
 	}
-	fileLogger, cleanup := withFileLogging(logger, state.configFile.Logging, cfg.Verbose)
+	fileLogger, _, cleanup := withFileLogging(logger, state.configFile.Logging, cfg.Verbose)
 	defer cleanup()
 	logger = fileLogger
 	logger.Info("Starting devback application")
@@ -245,24 +245,32 @@ func setupLogger(verbose bool) *slog.Logger {
 	return slog.New(handler)
 }
 
+// withFileLogging returns the combined stderr+file logger, a file-only logger,
+// and a cleanup func. The file-only logger is pinned to info level regardless
+// of logging.level: it carries records that must reach the file log without
+// touching the terminal (e.g. skip-hook reasons, which would otherwise
+// corrupt git's progress output). Without a usable file sink the file-only
+// logger discards records — falling back to stderr would reintroduce exactly
+// the console spam it exists to prevent.
 func withFileLogging(
 	logger *slog.Logger,
 	logCfg usecase.LoggingConfig,
 	verbose bool,
-) (*slog.Logger, func()) {
+) (*slog.Logger, *slog.Logger, func()) {
+	discard := slog.New(slog.DiscardHandler)
 	dir := strings.TrimSpace(logCfg.Dir)
 	if dir == "" {
-		return logger, func() {}
+		return logger, discard, func() {}
 	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		logger.Warn("Cannot resolve home dir for log file", "error", err)
-		return logger, func() {}
+		return logger, discard, func() {}
 	}
 	expanded := usecase.ExpandHomeDirPublic(dir, homeDir)
 	if err := os.MkdirAll(expanded, 0o750); err != nil {
 		logger.Warn("Cannot create log directory", "path", expanded, "error", err)
-		return logger, func() {}
+		return logger, discard, func() {}
 	}
 	filename := "devback-" + time.Now().Format("2006-01-02") + ".log"
 	logPath := filepath.Join(expanded, filename)
@@ -270,7 +278,7 @@ func withFileLogging(
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // path from config
 	if err != nil {
 		logger.Warn("Cannot open log file", "path", logPath, "error", err)
-		return logger, func() {}
+		return logger, discard, func() {}
 	}
 
 	fileLevel := parseLogLevel(logCfg.Level)
@@ -282,9 +290,14 @@ func withFileLogging(
 		UseColor: false,
 	})
 
+	fileOnlyHandler := loghandler.NewHandler(f, &loghandler.Options{
+		Level:    slog.LevelInfo,
+		UseColor: false,
+	})
+
 	stderrHandler := logger.Handler()
 	combined := loghandler.NewMultiHandler(stderrHandler, fileHandler)
-	return slog.New(combined), func() { _ = f.Close() }
+	return slog.New(combined), slog.New(fileOnlyHandler), func() { _ = f.Close() }
 }
 
 func parseLogLevel(s string) slog.Level {

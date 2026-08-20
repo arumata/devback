@@ -49,20 +49,22 @@ func runHookPostCommit(
 	}
 
 	if isRebaseReflogAction() {
-		logHookSkip(preflight.logger, "SKIP_REBASE_REFLOG")
+		logBackupSkipped(preflight, "post-commit", "SKIP_REBASE_REFLOG")
 		return exitSuccess
 	}
 
 	inRebase, err := isRebaseInProgress(ctx, preflight.deps.FileSystem, preflight.gitDir)
 	if err != nil {
+		logBackupSkipped(preflight, "post-commit", "SKIP_REBASE_STATE_UNREADABLE")
+		preflight.logger.Debug("rebase detection failed", "error", err, "git_dir", preflight.gitDir)
 		return exitSuccess
 	}
 	if inRebase {
-		logHookSkip(preflight.logger, "SKIP_REBASE_IN_PROGRESS")
+		logBackupSkipped(preflight, "post-commit", "SKIP_REBASE_IN_PROGRESS")
 		return exitSuccess
 	}
 
-	return runBackupWithNotify(ctx, hookCfg, preflight)
+	return runBackupWithNotify(ctx, hookCfg, preflight, "post-commit")
 }
 
 func isRebaseReflogAction() bool {
@@ -71,7 +73,7 @@ func isRebaseReflogAction() bool {
 }
 
 //nolint:unparam // hooks always return exitSuccess to never block git
-func runBackupWithNotify(ctx context.Context, hookCfg *hookConfig, preflight *hookPreflight) int {
+func runBackupWithNotify(ctx context.Context, hookCfg *hookConfig, preflight *hookPreflight, hook string) int {
 	if hookCfg == nil || preflight == nil {
 		return exitSuccess
 	}
@@ -91,13 +93,23 @@ func runBackupWithNotify(ctx context.Context, hookCfg *hookConfig, preflight *ho
 
 	result, err := usecase.Backup(ctx, cfg, preflight.deps, preflight.logger)
 	if err != nil {
-		if errors.Is(err, usecase.ErrLockBusy) || errors.Is(err, usecase.ErrInterrupted) || errors.Is(err, context.Canceled) {
+		if errors.Is(err, usecase.ErrLockBusy) {
+			logBackupSkipped(preflight, hook, "SKIP_LOCK_BUSY")
 			return exitSuccess
 		}
+		if errors.Is(err, usecase.ErrInterrupted) || errors.Is(err, context.Canceled) {
+			logBackupSkipped(preflight, hook, "SKIP_INTERRUPTED")
+			return exitSuccess
+		}
+		updateStampWithLog(ctx, preflight, resolveStampPath(ctx, preflight))
 		sendHookNotification(ctx, hookCfg, preflight, false, result)
 		return exitSuccess
 	}
 
+	// Stamp the backup so the post-rewrite fired by the same operation
+	// (`git commit --amend` runs post-commit first) can debounce instead of
+	// taking a second snapshot of the identical state.
+	updateStampWithLog(ctx, preflight, resolveStampPath(ctx, preflight))
 	sendHookNotification(ctx, hookCfg, preflight, true, result)
 	return exitSuccess
 }
