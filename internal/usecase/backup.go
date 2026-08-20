@@ -495,21 +495,54 @@ func recordCopyError(fs FileSystemPort, path string, err error, result *BackupRe
 	result.PartialSuccess = true
 }
 
-func copyFile(ctx context.Context, deps *Dependencies, src, dst string, mode int) error {
-	if err := deps.FileSystem.Copy(ctx, src, dst); err != nil {
-		return err
+// copyFile copies src into dst. When prevPath points at an identical file in
+// the previous completed snapshot, dst becomes a hardlink to it instead of a
+// copy; linked reports which branch was taken. Copies preserve the source
+// mtime (best effort) so the next backup cycle can detect unchanged files.
+func copyFile(ctx context.Context, deps *Dependencies, src, dst string, info FileInfo, prevPath string) (bool, error) {
+	if tryLinkUnchanged(ctx, deps, dst, info, prevPath) {
+		return true, nil
 	}
-	if mode != 0 {
+	if err := deps.FileSystem.Copy(ctx, src, dst); err != nil {
+		return false, err
+	}
+	if mode := info.Mode(); mode != 0 {
 		_ = deps.FileSystem.Chmod(ctx, dst, mode&0o777)
 	}
-	return nil
+	if mtime := info.ModTime(); !mtime.IsZero() {
+		_ = deps.FileSystem.Chtimes(ctx, dst, mtime, mtime)
+	}
+	return false, nil
+}
+
+// tryLinkUnchanged hardlinks dst to prevPath when the source file provably
+// matches the previous snapshot's copy: both regular, same size, same
+// permission bits, and same mtime at second precision (filesystems round
+// mtime differently). Any doubt or failure falls back to a regular copy —
+// dedup must never be able to break a backup.
+func tryLinkUnchanged(ctx context.Context, deps *Dependencies, dst string, info FileInfo, prevPath string) bool {
+	if prevPath == "" || info == nil || !info.IsRegular() {
+		return false
+	}
+	prev, err := deps.FileSystem.Lstat(ctx, prevPath)
+	if err != nil || prev == nil || !prev.IsRegular() || prev.IsSymlink() {
+		return false
+	}
+	if prev.Size() != info.Size() || prev.Mode()&0o777 != info.Mode()&0o777 {
+		return false
+	}
+	if prev.ModTime().Unix() != info.ModTime().Unix() {
+		return false
+	}
+	return deps.FileSystem.Link(ctx, prevPath, dst) == nil
 }
 
 func copyDirRecursive(
 	ctx context.Context,
 	deps *Dependencies,
 	src,
-	dst string,
+	dst,
+	prevRoot string,
 	result *BackupResult,
 	bc *backupContext,
 ) error {
@@ -535,7 +568,11 @@ func copyDirRecursive(
 			return nil
 		}
 
-		copyDirEntry(ctx, deps, path, target, info, result, &copyErrors)
+		prevPath := ""
+		if prevRoot != "" {
+			prevPath = deps.FileSystem.Join(prevRoot, rel)
+		}
+		copyDirEntry(ctx, deps, path, target, prevPath, info, result, &copyErrors)
 		return nil
 	})
 
@@ -557,7 +594,8 @@ func copyDirEntry(
 	ctx context.Context,
 	deps *Dependencies,
 	path,
-	target string,
+	target,
+	prevPath string,
 	info FileInfo,
 	result *BackupResult,
 	copyErrors *[]string,
@@ -592,11 +630,17 @@ func copyDirEntry(
 		recordCopyError(deps.FileSystem, parentDir, err, result, copyErrors)
 		return
 	}
-	if err := copyFile(ctx, deps, path, target, info.Mode()); err != nil {
+	linked, err := copyFile(ctx, deps, path, target, info, prevPath)
+	if err != nil {
 		recordCopyError(deps.FileSystem, path, err, result, copyErrors)
 		return
 	}
-	if result != nil {
+	if result == nil {
+		return
+	}
+	if linked {
+		result.LinkedFiles++
+	} else {
 		result.CopiedFiles++
 	}
 }
@@ -606,7 +650,8 @@ func copySelectedFiles(
 	deps *Dependencies,
 	paths []string,
 	srcRoot,
-	dstRoot string,
+	dstRoot,
+	prevRoot string,
 	result *BackupResult,
 	bc *backupContext,
 ) error {
@@ -617,11 +662,12 @@ func copySelectedFiles(
 	workers := runtime.NumCPU() * 2
 	jobs := make(chan string, workers*2)
 	state := &copySelectedState{
-		deps:    deps,
-		srcRoot: srcRoot,
-		dstRoot: dstRoot,
-		result:  result,
-		bc:      bc,
+		deps:     deps,
+		srcRoot:  srcRoot,
+		dstRoot:  dstRoot,
+		prevRoot: prevRoot,
+		result:   result,
+		bc:       bc,
 	}
 
 	var wg sync.WaitGroup
@@ -649,6 +695,7 @@ type copySelectedState struct {
 	deps       *Dependencies
 	srcRoot    string
 	dstRoot    string
+	prevRoot   string
 	result     *BackupResult
 	bc         *backupContext
 	mu         sync.Mutex
@@ -665,10 +712,15 @@ func (s *copySelectedState) recordError(path string, err error) {
 	}
 }
 
-func (s *copySelectedState) recordCopied() {
+func (s *copySelectedState) recordCopied(linked bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.result != nil {
+	if s.result == nil {
+		return
+	}
+	if linked {
+		s.result.LinkedFiles++
+	} else {
 		s.result.CopiedFiles++
 	}
 }
@@ -718,12 +770,21 @@ func copySelectedPath(ctx context.Context, state *copySelectedState, rel string)
 	if err := createParentDirForCopy(ctx, state.deps, dst, rel); err != nil {
 		return err
 	}
-	if err := copyFile(ctx, state.deps, src, dst, fi.Mode()); err != nil {
+	prevPath := ""
+	if state.prevRoot != "" {
+		prevPath = state.deps.FileSystem.Join(state.prevRoot, rel)
+	}
+	linked, err := copyFile(ctx, state.deps, src, dst, fi, prevPath)
+	if err != nil {
 		return fmt.Errorf("copy '%s': %w", rel, err)
 	}
-	state.recordCopied()
+	state.recordCopied(linked)
 	if state.bc.verbose {
-		state.bc.vlogf("   COPIED: %s", rel)
+		if linked {
+			state.bc.vlogf("   LINKED: %s", rel)
+		} else {
+			state.bc.vlogf("   COPIED: %s", rel)
+		}
 	}
 	return nil
 }
@@ -864,19 +925,65 @@ func humanKB(kb int64) string {
 	return fmt.Sprintf("%d KiB", kb)
 }
 
-func dirSizeKB(ctx context.Context, deps *Dependencies, root string, bc *backupContext) (int64, error) {
+// snapshotSizeKB sums regular file sizes under root. With a non-nil seen map
+// it counts each inode only once across calls sharing the map, so hard-linked
+// files are charged to the first snapshot walked; files without a FileID are
+// counted as unique (safe overestimate).
+func snapshotSizeKB(
+	ctx context.Context,
+	deps *Dependencies,
+	root string,
+	seen map[FileID]struct{},
+	bc *backupContext,
+) (int64, error) {
 	var total int64
 	walkErr := deps.FileSystem.Walk(ctx, root, func(path string, info FileInfo, err error) error {
 		if err != nil {
 			bc.warnf("walk '%s': %v", path, err)
 			return nil
 		}
-		if info != nil && info.IsRegular() {
-			total += info.Size()
+		if info == nil || !info.IsRegular() {
+			return nil
 		}
+		if seen != nil {
+			if id, ok := info.FileID(); ok {
+				if _, dup := seen[id]; dup {
+					return nil
+				}
+				seen[id] = struct{}{}
+			}
+		}
+		total += info.Size()
 		return nil
 	})
 	return (total + 1023) / 1024, walkErr
+}
+
+// chargedSnapshotSizesKB returns per-snapshot sizes where each inode is
+// charged to the newest live snapshot containing it (snapshots are walked
+// newest to oldest). The sum equals the real disk usage, and removing the
+// oldest snapshot frees exactly its charged bytes: an inode charged to an
+// old snapshot by construction appears in no newer one. A nil alive slice
+// treats all snapshots as live.
+func chargedSnapshotSizesKB(
+	ctx context.Context,
+	deps *Dependencies,
+	snaps []snapshot,
+	alive []bool,
+	bc *backupContext,
+) ([]int64, int64) {
+	sizes := make([]int64, len(snaps))
+	var totalKB int64
+	seen := make(map[FileID]struct{})
+	for i := len(snaps) - 1; i >= 0; i-- {
+		if alive != nil && !alive[i] {
+			continue
+		}
+		kb, _ := snapshotSizeKB(ctx, deps, snaps[i].TimeDir, seen, bc)
+		sizes[i] = kb
+		totalKB += kb
+	}
+	return sizes, totalKB
 }
 
 func removeSnapshot(ctx context.Context, deps *Dependencies, s snapshot, bc *backupContext) {
@@ -996,16 +1103,7 @@ func applySizeLimit(
 	kbLimit := int64(cfg.MaxTotalGBPerRepo) * 1024 * 1024
 	kbLimit += int64(cfg.SizeMarginMB) * 1024
 
-	sizes := make([]int64, len(snaps))
-	var totalKB int64
-	for i, s := range snaps {
-		if !alive[i] {
-			continue
-		}
-		kb, _ := dirSizeKB(ctx, deps, s.TimeDir, bc)
-		sizes[i] = kb
-		totalKB += kb
-	}
+	sizes, totalKB := chargedSnapshotSizesKB(ctx, deps, snaps, alive, bc)
 	bc.vlogf("[rotate:size] total=%s limit=%s", humanKB(totalKB), humanKB(kbLimit))
 
 	for i := 0; i < len(snaps) && totalKB > kbLimit; i++ {
@@ -1028,11 +1126,7 @@ func applySizeLimit(
 
 func logRotationSummary(ctx context.Context, deps *Dependencies, repoDir string, bc *backupContext) {
 	snapsFinal, _ := listSnapshots(ctx, deps, repoDir)
-	var totalKB int64
-	for _, s := range snapsFinal {
-		kb, _ := dirSizeKB(ctx, deps, s.TimeDir, bc)
-		totalKB += kb
-	}
+	_, totalKB := chargedSnapshotSizesKB(ctx, deps, snapsFinal, nil, bc)
 	bc.logf("[rotate:summary] %d snapshots, total %s", len(snapsFinal), humanKB(totalKB))
 }
 
@@ -1054,6 +1148,7 @@ func printConfig(cfg *Config, bc *backupContext) {
 	bc.vlogf("   Max total GB per repo: %d", cfg.MaxTotalGBPerRepo)
 	bc.vlogf("   Size margin MB: %d", cfg.SizeMarginMB)
 	bc.vlogf("   No size check: %t", cfg.NoSize)
+	bc.vlogf("   Link dedup: %t", cfg.LinkDedup)
 	bc.vlogf("   Snapshot time format: HHMMSS-NNNNNNNNN")
 
 	style := strings.TrimSpace(cfg.RepoKeyStyle)
@@ -1122,7 +1217,8 @@ func copyRepoSnapshot(
 	ctx context.Context,
 	deps *Dependencies,
 	repoRoot,
-	targetPath string,
+	targetPath,
+	prevRoot string,
 	result *BackupResult,
 	bc *backupContext,
 ) error {
@@ -1132,11 +1228,15 @@ func copyRepoSnapshot(
 	}
 	srcGit := dirs.commonDir
 	dstGit := deps.FileSystem.Join(targetPath, ".git")
+	prevGit := ""
+	if prevRoot != "" {
+		prevGit = deps.FileSystem.Join(prevRoot, ".git")
+	}
 	if _, err := deps.FileSystem.Stat(ctx, srcGit); err != nil {
 		return fmt.Errorf("git common dir not found: %w", err)
 	}
 	bc.vlogf("→ Copy .git -> %s", dstGit)
-	if err := copyGitDirWithRetry(ctx, deps, srcGit, dstGit, result, bc); err != nil {
+	if err := copyGitDirWithRetry(ctx, deps, srcGit, dstGit, prevGit, result, bc); err != nil {
 		bc.warnf("copy .git encountered issues: %v", err)
 		return err
 	}
@@ -1149,13 +1249,44 @@ func copyRepoSnapshot(
 	}
 	verifySnapshotHead(ctx, deps, repoRoot, targetPath, result, bc)
 
+	keep, err := selectIgnoredUntracked(ctx, deps, repoRoot, bc)
+	if err != nil {
+		return err
+	}
+
+	if err := copySelectedFiles(ctx, deps, keep, repoRoot, targetPath, prevRoot, result, bc); err != nil {
+		return err
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if len(keep) > 0 {
+		bc.logf("✓ Copied ignored/untracked: %d item(s)", len(keep))
+	} else {
+		bc.logf("⌘ No ignored/untracked files to copy (after exclusions)")
+	}
+	if result.LinkedFiles > 0 {
+		bc.logf("✓ Linked %d file(s) from previous snapshot", result.LinkedFiles)
+	}
+
+	return nil
+}
+
+// selectIgnoredUntracked lists ignored/untracked files to back up, minus the
+// .devbackignore exclusions.
+func selectIgnoredUntracked(
+	ctx context.Context,
+	deps *Dependencies,
+	repoRoot string,
+	bc *backupContext,
+) ([]string, error) {
 	excludes, err := readDevbackIgnore(ctx, deps, repoRoot, bc)
 	if err != nil {
 		bc.warnf(".devbackignore: %v", err)
 	}
 	allPaths, err := deps.Git.ListIgnoredUntracked(ctx, repoRoot)
 	if err != nil {
-		return fmt.Errorf("git ls-files: %w", ErrCritical)
+		return nil, fmt.Errorf("git ls-files: %w", ErrCritical)
 	}
 	if bc.verbose {
 		bc.vlogf("→ Raw ignored/untracked from git: %d", len(allPaths))
@@ -1172,20 +1303,7 @@ func copyRepoSnapshot(
 		bc.vlogf("   KEEP: %s", p)
 		keep = append(keep, p)
 	}
-
-	if err := copySelectedFiles(ctx, deps, keep, repoRoot, targetPath, result, bc); err != nil {
-		return err
-	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	if len(keep) > 0 {
-		bc.logf("✓ Copied ignored/untracked: %d item(s)", len(keep))
-	} else {
-		bc.logf("⌘ No ignored/untracked files to copy (after exclusions)")
-	}
-
-	return nil
+	return keep, nil
 }
 
 // copyGitDirWithRetry copies the git dir and retries once when files vanish
@@ -1195,12 +1313,13 @@ func copyGitDirWithRetry(
 	ctx context.Context,
 	deps *Dependencies,
 	srcGit,
-	dstGit string,
+	dstGit,
+	prevGit string,
 	result *BackupResult,
 	bc *backupContext,
 ) error {
 	before := *result
-	err := copyDirRecursive(ctx, deps, srcGit, dstGit, result, bc)
+	err := copyDirRecursive(ctx, deps, srcGit, dstGit, prevGit, result, bc)
 	if ctx.Err() != nil || result.VanishedFiles == before.VanishedFiles {
 		return err
 	}
@@ -1210,7 +1329,7 @@ func copyGitDirWithRetry(
 	if rmErr := deps.FileSystem.RemoveAll(ctx, dstGit); rmErr != nil {
 		return fmt.Errorf("reset .git copy for retry: %w", rmErr)
 	}
-	return copyDirRecursive(ctx, deps, srcGit, dstGit, result, bc)
+	return copyDirRecursive(ctx, deps, srcGit, dstGit, prevGit, result, bc)
 }
 
 // verifySnapshotHead confirms the snapshot object store still resolves the
@@ -1262,28 +1381,9 @@ func planRepoSnapshot(
 	}
 	bc.logf("Dry run: would copy .git to:%s", dstGit)
 
-	excludes, err := readDevbackIgnore(ctx, deps, repoRoot, bc)
+	keep, err := selectIgnoredUntracked(ctx, deps, repoRoot, bc)
 	if err != nil {
-		bc.warnf(".devbackignore: %v", err)
-	}
-	allPaths, err := deps.Git.ListIgnoredUntracked(ctx, repoRoot)
-	if err != nil {
-		return 0, fmt.Errorf("git ls-files: %w", ErrCritical)
-	}
-	if bc.verbose {
-		bc.vlogf("→ Raw ignored/untracked from git: %d", len(allPaths))
-		for i, p := range allPaths {
-			bc.vlogf("   %4d  %s", i+1, p)
-		}
-	}
-	keep := make([]string, 0, len(allPaths))
-	for _, p := range allPaths {
-		if skip, ex := shouldSkip(p, excludes); skip {
-			bc.vlogf("   SKIP: %s (matched '%s')", p, ex)
-			continue
-		}
-		bc.vlogf("   KEEP: %s", p)
-		keep = append(keep, p)
+		return 0, err
 	}
 
 	if len(keep) > 0 {
@@ -1335,6 +1435,7 @@ func handleBackupFlow(
 	if ctx.Err() != nil {
 		return nil, ErrInterrupted
 	}
+	prevRoot := findPrevSnapshot(ctx, deps, repoDir, cfg, bc)
 	now := time.Now()
 	dateDir := now.Format("2006-01-02")
 	targetPath, err := createUniqueSnapshotDir(ctx, deps, repoDir, dateDir, now)
@@ -1363,7 +1464,7 @@ func handleBackupFlow(
 	}
 
 	result := &BackupResult{}
-	if err := copyRepoSnapshot(ctx, deps, repoRoot, targetPath, result, bc); err != nil {
+	if err := copyRepoSnapshot(ctx, deps, repoRoot, targetPath, prevRoot, result, bc); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, ErrInterrupted
 		}
@@ -1397,6 +1498,28 @@ func handleBackupFlow(
 		return result, ErrCritical
 	}
 	return result, nil
+}
+
+// findPrevSnapshot returns the newest completed snapshot to hardlink
+// unchanged files against, or "" when dedup is disabled or no completed
+// snapshot exists (the backup then falls back to a full copy).
+func findPrevSnapshot(
+	ctx context.Context,
+	deps *Dependencies,
+	repoDir string,
+	cfg *Config,
+	bc *backupContext,
+) string {
+	if !cfg.LinkDedup {
+		return ""
+	}
+	snaps, err := listSnapshots(ctx, deps, repoDir)
+	if err != nil || len(snaps) == 0 {
+		return ""
+	}
+	prev := snaps[len(snaps)-1].TimeDir
+	bc.vlogf("→ Link dedup against previous snapshot: %s", prev)
+	return prev
 }
 
 func createUniqueSnapshotDir(

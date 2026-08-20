@@ -17,6 +17,14 @@ type Config struct {
 	AutoRemoteMerge   bool
 	RemoteHashLen     int
 	NoSize            bool
+	LinkDedup         bool
+}
+
+// FileID is an opaque identifier of the underlying file (inode) shared by
+// hard-linked paths on the same filesystem.
+type FileID struct {
+	Dev uint64
+	Ino uint64
 }
 
 // FileInfo represents file information.
@@ -28,6 +36,9 @@ type FileInfo interface {
 	IsDir() bool
 	IsSymlink() bool
 	IsRegular() bool
+	// FileID identifies the underlying inode; ok is false when the
+	// platform or implementation cannot provide it.
+	FileID() (FileID, bool)
 	Sys() interface{}
 }
 
@@ -93,6 +104,7 @@ type ProcessInfo struct {
 type BackupResult struct {
 	TotalFiles     int
 	CopiedFiles    int
+	LinkedFiles    int
 	SkippedFiles   int
 	SkippedDirs    int
 	VanishedFiles  int

@@ -32,12 +32,14 @@ func applyOverridesForTest(t *testing.T, cfg *Config, local, worktree map[string
 
 func TestApplyRepoRotationOverrides_AppliesValues(t *testing.T) {
 	cfg := &Config{KeepCount: 30, KeepDays: 90, MaxTotalGBPerRepo: 10, SizeMarginMB: 0, NoSize: true}
+	cfg.LinkDedup = true
 	local := map[string]string{
 		"backup.keepCount":    "8",
 		"backup.keepDays":     "14",
 		"backup.maxTotalGb":   "2",
 		"backup.sizeMarginMb": "100",
 		"backup.noSize":       "false",
+		"backup.linkDedup":    "false",
 	}
 	if err := applyOverridesForTest(t, cfg, local, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -47,6 +49,9 @@ func TestApplyRepoRotationOverrides_AppliesValues(t *testing.T) {
 	}
 	if cfg.NoSize {
 		t.Fatal("bool override not applied")
+	}
+	if cfg.LinkDedup {
+		t.Fatal("linkDedup override not applied")
 	}
 }
 
@@ -74,9 +79,10 @@ func TestApplyRepoRotationOverrides_WorktreeWinsOverLocal(t *testing.T) {
 
 func TestApplyRepoRotationOverrides_InvalidValues(t *testing.T) {
 	cases := map[string]map[string]string{
-		"non-integer":  {"backup.keepCount": "abc"},
-		"negative":     {"backup.keepDays": "-1"},
-		"invalid bool": {"backup.noSize": "maybe"},
+		"non-integer":        {"backup.keepCount": "abc"},
+		"negative":           {"backup.keepDays": "-1"},
+		"invalid bool":       {"backup.noSize": "maybe"},
+		"invalid link dedup": {"backup.linkDedup": "maybe"},
 	}
 	for name, local := range cases {
 		t.Run(name, func(t *testing.T) {

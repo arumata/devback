@@ -79,6 +79,8 @@ func (m mockFileInfo) IsSymlink() bool    { return false }
 func (m mockFileInfo) IsRegular() bool    { return !m.isDir }
 func (m mockFileInfo) Sys() interface{}   { return nil }
 
+func (m mockFileInfo) FileID() (usecase.FileID, bool) { return usecase.FileID{}, false }
+
 func (m *mockFileSystem) Join(elements ...string) string {
 	return filepath.Join(elements...)
 }

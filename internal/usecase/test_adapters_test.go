@@ -144,6 +144,11 @@ func (a *testFileSystem) Move(ctx context.Context, src, dst string) error {
 	return os.Rename(src, dst)
 }
 
+func (a *testFileSystem) Link(ctx context.Context, oldname, newname string) error {
+	_ = ctx
+	return os.Link(oldname, newname)
+}
+
 func (a *testFileSystem) Readlink(ctx context.Context, path string) (string, error) {
 	_ = ctx
 	return os.Readlink(path)
@@ -225,6 +230,16 @@ func (f *fileInfoWrapperTest) IsDir() bool        { return f.info.IsDir() }
 func (f *fileInfoWrapperTest) IsSymlink() bool    { return f.info.Mode()&os.ModeSymlink != 0 }
 func (f *fileInfoWrapperTest) IsRegular() bool    { return f.info.Mode().IsRegular() }
 func (f *fileInfoWrapperTest) Sys() interface{}   { return f.info.Sys() }
+
+func (f *fileInfoWrapperTest) FileID() (FileID, bool) {
+	st, ok := f.info.Sys().(*syscall.Stat_t)
+	if !ok || st == nil {
+		return FileID{}, false
+	}
+	// Dev/Ino types differ across unix platforms, conversions are required.
+	// #nosec G115 -- dev/ino are opaque identifiers, sign is irrelevant.
+	return FileID{Dev: uint64(st.Dev), Ino: uint64(st.Ino)}, true //nolint:unconvert
+}
 
 type dirEntryWrapperTest struct {
 	entry fs.DirEntry

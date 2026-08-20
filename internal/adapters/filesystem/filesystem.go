@@ -155,6 +155,11 @@ func (a *Adapter) Move(ctx context.Context, src, dst string) error {
 	return os.Rename(src, dst)
 }
 
+// Link creates newname as a hard link to oldname
+func (a *Adapter) Link(ctx context.Context, oldname, newname string) error {
+	return os.Link(oldname, newname)
+}
+
 // Readlink reads symlink target
 func (a *Adapter) Readlink(ctx context.Context, path string) (string, error) {
 	return os.Readlink(path)
@@ -293,6 +298,11 @@ func (w *fileInfoWrapper) IsSymlink() bool {
 // IsRegular returns true if the file is a regular file
 func (w *fileInfoWrapper) IsRegular() bool {
 	return w.FileInfo.Mode().IsRegular()
+}
+
+// FileID returns the device/inode identifier of the file
+func (w *fileInfoWrapper) FileID() (usecase.FileID, bool) {
+	return fileIDFromSys(w.FileInfo.Sys())
 }
 
 // Sys returns underlying data source

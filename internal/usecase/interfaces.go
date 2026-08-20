@@ -37,6 +37,7 @@ type FileSystemPort interface {
 	// File operations
 	Copy(ctx context.Context, src, dst string) error
 	Move(ctx context.Context, src, dst string) error
+	Link(ctx context.Context, oldname, newname string) error
 	Readlink(ctx context.Context, path string) (string, error)
 	Symlink(ctx context.Context, target, path string) error
 	Chmod(ctx context.Context, path string, perm int) error

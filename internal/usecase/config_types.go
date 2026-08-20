@@ -16,6 +16,7 @@ type BackupConfig struct {
 	MaxTotalGB   int    `toml:"max_total_gb"`
 	SizeMarginMB int    `toml:"size_margin_mb"`
 	NoSize       bool   `toml:"no_size"`
+	LinkDedup    bool   `toml:"link_dedup"`
 }
 
 // NotificationsConfig holds notification settings.
@@ -64,6 +65,7 @@ func DefaultConfigFile() ConfigFile {
 			MaxTotalGB:   10,
 			SizeMarginMB: 0,
 			NoSize:       true,
+			LinkDedup:    true,
 		},
 		Notifications: NotificationsConfig{
 			Enabled: true,

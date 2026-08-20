@@ -92,23 +92,27 @@ size_margin_mb = %[5]d
 # When true, max_total_gb and size_margin_mb are ignored.
 no_size = %[6]t
 
+# Hardlink files unchanged since the previous snapshot instead of
+# copying them (saves disk space; snapshots stay browsable).
+link_dedup = %[7]t
+
 # ── Desktop Notifications ────────────────────────────────────────
 [notifications]
 
 # Enable notifications after backup completion.
-enabled = %[7]t
+enabled = %[8]t
 
 # Notification sound ("default" = system default).
-sound = %[8]q
+sound = %[9]q
 
 # ── Logging ──────────────────────────────────────────────────────
 [logging]
 
 # Log directory. Supports ~, $HOME, ${HOME}. Created automatically.
-dir = %[9]q
+dir = %[10]q
 
 # Minimum log level: debug, info, warn, error.
-level = %[10]q
+level = %[11]q
 
 # ── Repository Key ───────────────────────────────────────────────
 [repo_key]
@@ -117,13 +121,13 @@ level = %[10]q
 #   auto             - auto-detect: slug, remote, or name+hash (default)
 #   custom           - uses backup.slug (set via: devback setup --slug)
 #   remote-hierarchy - host/owner/repo from remote.origin.url
-style = %[11]q
+style = %[12]q
 
 # Merge snapshots from clones sharing the same remote.origin.url.
-auto_remote_merge = %[12]t
+auto_remote_merge = %[13]t
 
 # Hash suffix length for remote-hierarchy style.
-remote_hash_len = %[13]d
+remote_hash_len = %[14]d
 `,
 		cfg.Backup.BaseDir,
 		cfg.Backup.KeepCount,
@@ -131,6 +135,7 @@ remote_hash_len = %[13]d
 		cfg.Backup.MaxTotalGB,
 		cfg.Backup.SizeMarginMB,
 		cfg.Backup.NoSize,
+		cfg.Backup.LinkDedup,
 		cfg.Notifications.Enabled,
 		cfg.Notifications.Sound,
 		cfg.Logging.Dir,

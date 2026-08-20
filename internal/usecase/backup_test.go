@@ -375,6 +375,7 @@ func TestCopyDirRecursive_CopiesSymlink(t *testing.T) {
 		&Dependencies{FileSystem: fs},
 		src,
 		dst,
+		"",
 		result,
 		newTestBackupContext(false),
 	); err != nil {
@@ -410,6 +411,7 @@ func TestCopyDirRecursive_PermissionError(t *testing.T) {
 		&Dependencies{FileSystem: mockFS},
 		"/src",
 		"/dst",
+		"",
 		result,
 		newTestBackupContext(false),
 	); err == nil {
@@ -441,6 +443,7 @@ func TestCopyDirRecursive_CreateDirError(t *testing.T) {
 		&Dependencies{FileSystem: mockFS},
 		"/src",
 		"/dst",
+		"",
 		result,
 		newTestBackupContext(false),
 	); err == nil {
@@ -469,6 +472,7 @@ func TestCopyDirRecursive_CopyError(t *testing.T) {
 		&Dependencies{FileSystem: mockFS},
 		"/src",
 		"/dst",
+		"",
 		result,
 		newTestBackupContext(false),
 	); err == nil {
@@ -494,6 +498,7 @@ func TestCopyDirRecursive_SymlinkReadlinkError(t *testing.T) {
 		&Dependencies{FileSystem: mockFS},
 		"/src",
 		"/dst",
+		"",
 		result,
 		newTestBackupContext(false),
 	); err == nil {
@@ -525,6 +530,7 @@ func TestCopyDirRecursive_SymlinkCreateError(t *testing.T) {
 		&Dependencies{FileSystem: mockFS},
 		"/src",
 		"/dst",
+		"",
 		result,
 		newTestBackupContext(false),
 	); err == nil {
@@ -548,6 +554,7 @@ func TestCopyDirRecursive_InfoNil(t *testing.T) {
 		&Dependencies{FileSystem: mockFS},
 		"/src",
 		"/dst",
+		"",
 		&BackupResult{},
 		newTestBackupContext(false),
 	); err != nil {
@@ -578,6 +585,7 @@ func TestCopySelectedFiles(t *testing.T) {
 		paths,
 		src,
 		dst,
+		"",
 		&BackupResult{},
 		newTestBackupContext(false),
 	); err != nil {
@@ -609,6 +617,7 @@ func TestCopySelectedFiles_LstatVanished(t *testing.T) {
 		[]string{"missing.txt"},
 		"/src",
 		"/dst",
+		"",
 		result,
 		newTestBackupContext(false),
 	); err != nil {
@@ -638,6 +647,7 @@ func TestCopySelectedFiles_ReadlinkError(t *testing.T) {
 		[]string{"link"},
 		"/src",
 		"/dst",
+		"",
 		&BackupResult{},
 		newTestBackupContext(false),
 	); err == nil {
@@ -933,7 +943,7 @@ func TestHandleBackupFlow_CopyError(t *testing.T) {
 
 func TestCopyRepoSnapshot_MissingGit(t *testing.T) {
 	ctx := context.Background()
-	err := copyRepoSnapshot(ctx, &Dependencies{}, "/repo", "/dst", &BackupResult{}, newTestBackupContext(false))
+	err := copyRepoSnapshot(ctx, &Dependencies{}, "/repo", "/dst", "", &BackupResult{}, newTestBackupContext(false))
 	if err == nil {
 		t.Fatal("expected error without git adapter")
 	}
@@ -946,7 +956,7 @@ func TestCopyRepoSnapshot_NoGitDir(t *testing.T) {
 	repoRoot := t.TempDir()
 	target := t.TempDir()
 
-	err := copyRepoSnapshot(ctx, deps, repoRoot, target, &BackupResult{}, newTestBackupContext(false))
+	err := copyRepoSnapshot(ctx, deps, repoRoot, target, "", &BackupResult{}, newTestBackupContext(false))
 	if err == nil {
 		t.Fatal("expected error when .git is missing")
 	}
@@ -988,7 +998,7 @@ func TestCopyRepoSnapshot_UsesCommonGitDir(t *testing.T) {
 	deps := &Dependencies{FileSystem: fs, Git: mock}
 	target := t.TempDir()
 
-	if err := copyRepoSnapshot(ctx, deps, repoRoot, target, &BackupResult{}, newTestBackupContext(false)); err != nil {
+	if err := copyRepoSnapshot(ctx, deps, repoRoot, target, "", &BackupResult{}, newTestBackupContext(false)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1030,7 +1040,7 @@ func TestCopyRepoSnapshot_ListIgnoredError(t *testing.T) {
 	}
 
 	deps := &Dependencies{FileSystem: fs, Git: mock}
-	err := copyRepoSnapshot(ctx, deps, repoRoot, target, &BackupResult{}, newTestBackupContext(false))
+	err := copyRepoSnapshot(ctx, deps, repoRoot, target, "", &BackupResult{}, newTestBackupContext(false))
 	if !errors.Is(err, ErrCritical) {
 		t.Fatalf("expected critical error, got %v", err)
 	}
@@ -1051,7 +1061,7 @@ func TestCopyRepoSnapshot_DevbackIgnoreError(t *testing.T) {
 	}
 
 	deps := &Dependencies{FileSystem: failingReadFS{testFileSystem: newTestFileSystem()}, Git: mock}
-	err := copyRepoSnapshot(ctx, deps, repoRoot, target, &BackupResult{}, newTestBackupContext(false))
+	err := copyRepoSnapshot(ctx, deps, repoRoot, target, "", &BackupResult{}, newTestBackupContext(false))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1152,6 +1162,7 @@ func TestCopyGitDirWithRetry_RetriesOnceOnVanished(t *testing.T) {
 		&Dependencies{FileSystem: mockFS},
 		"/src/.git",
 		"/dst/.git",
+		"",
 		result,
 		newTestBackupContext(false),
 	)
@@ -1184,6 +1195,7 @@ func TestCopyGitDirWithRetry_PersistentVanishedKept(t *testing.T) {
 		&Dependencies{FileSystem: mockFS},
 		"/src/.git",
 		"/dst/.git",
+		"",
 		result,
 		newTestBackupContext(false),
 	)

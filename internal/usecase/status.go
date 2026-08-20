@@ -776,16 +776,15 @@ func scanBackups(
 		return result, nil
 	}
 	bc := newBackupContext(logger, false)
+	// Hardlink-deduplicated snapshots share inodes, so the real disk usage
+	// is the unique-inode total, not the per-snapshot sum.
+	_, totalKB := chargedSnapshotSizesKB(ctx, deps, snaps, nil, bc)
+	result.TotalSizeKB = totalKB
 	var latest time.Time
 	for _, snap := range snaps {
 		if ctx.Err() != nil {
 			return result, ErrInterrupted
 		}
-		kb, err := dirSizeKB(ctx, deps, snap.TimeDir, bc)
-		if err != nil {
-			return result, fmt.Errorf("scan snapshot size: %w", ErrCritical)
-		}
-		result.TotalSizeKB += kb
 		info, err := deps.FileSystem.Stat(ctx, snap.TimeDir)
 		if err != nil {
 			return result, fmt.Errorf("stat snapshot: %w", ErrCritical)

@@ -29,6 +29,8 @@ type mockFileInfo struct {
 	mode    int
 	modTime time.Time
 	isDir   bool
+	fileID  FileID
+	hasID   bool
 }
 
 func (m *mockFileInfo) Name() string       { return m.name }
@@ -39,6 +41,8 @@ func (m *mockFileInfo) IsDir() bool        { return m.isDir }
 func (m *mockFileInfo) IsSymlink() bool    { return m.mode&int(os.ModeSymlink) != 0 }
 func (m *mockFileInfo) IsRegular() bool    { return !m.isDir && m.mode&int(os.ModeType) == 0 }
 func (m *mockFileInfo) Sys() interface{}   { return nil }
+
+func (m *mockFileInfo) FileID() (FileID, bool) { return m.fileID, m.hasID }
 
 type mockFileSystem struct {
 	CreateDirFunc     func(ctx context.Context, path string, perm int) error
@@ -54,6 +58,7 @@ type mockFileSystem struct {
 	CreateDirExclFunc func(ctx context.Context, path string, perm int) error
 	CopyFunc          func(ctx context.Context, src, dst string) error
 	MoveFunc          func(ctx context.Context, src, dst string) error
+	LinkFunc          func(ctx context.Context, oldname, newname string) error
 	ReadlinkFunc      func(ctx context.Context, path string) (string, error)
 	SymlinkFunc       func(ctx context.Context, target, path string) error
 	ChmodFunc         func(ctx context.Context, path string, perm int) error
@@ -156,6 +161,13 @@ func (m *mockFileSystem) Copy(ctx context.Context, src, dst string) error {
 func (m *mockFileSystem) Move(ctx context.Context, src, dst string) error {
 	if m.MoveFunc != nil {
 		return m.MoveFunc(ctx, src, dst)
+	}
+	return nil
+}
+
+func (m *mockFileSystem) Link(ctx context.Context, oldname, newname string) error {
+	if m.LinkFunc != nil {
+		return m.LinkFunc(ctx, oldname, newname)
 	}
 	return nil
 }

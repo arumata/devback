@@ -15,6 +15,7 @@ DevBack creates structured repository snapshots with automatic rotation, flexibl
 
 - **Full backup**: Includes `.git` directory and all ignored/untracked files
 - **Structured snapshots**: Automatic organization by date and time
+- **Incremental snapshots**: Unchanged files are hardlinked to the previous snapshot instead of copied
 - **Automatic rotation**: Manage backup size and count
 - **Flexible naming**: Multiple directory naming styles
 - **Auto-migration**: Automatic migration from legacy directory structures
@@ -42,6 +43,36 @@ The time directory uses `HHMMSS-NNNNNNNNN` format, where the suffix is nanosecon
 ### Atomic Snapshot Reservation
 
 Snapshot directories are reserved atomically via exclusive directory creation and a `.reserve` marker file. This prevents collisions during parallel runs. The marker is removed after a successful backup.
+
+### Incremental Snapshots (Hardlink Deduplication)
+
+By default (`link_dedup = true`), each file is compared against the file at
+the same path in the previous completed snapshot. When the file is unchanged
+(same size, mtime at second precision, and permission bits), the new snapshot
+gets a hardlink to the previous snapshot's file instead of a fresh copy. Heavy
+immutable files (`.git/objects` packs, build artifacts, models) occupy disk
+space once, no matter how many snapshots contain them.
+
+Properties:
+
+- links are created **only between snapshots** — a snapshot never links to
+  files of the source repository;
+- any link failure (different filesystem, no hardlink support) silently falls
+  back to a regular copy; deduplication can never break a backup;
+- snapshots remain plain browsable directories; restore is a regular `cp -a`
+  (copying dereferences hardlinks);
+- rotation works as before: deleting a snapshot drops its links, and disk
+  space is freed when the last link disappears;
+- size-based rotation and `devback status --scan-backups` report real disk
+  usage (each inode is counted once);
+- the backup log reports `Linked N file(s) from previous snapshot`.
+
+The first backup after enabling the feature is always full (older snapshots
+carry copy-time mtimes); deduplication kicks in from the second cycle.
+
+**Important:** never edit files inside backups in place — a file shared by
+several snapshots changes in all of them at once. Backups are meant to be
+read-only and restored by copying.
 
 ## Installation
 
@@ -212,6 +243,7 @@ keep_days = 90
 max_total_gb = 10
 size_margin_mb = 0
 no_size = true
+link_dedup = true
 
 [notifications]
 enabled = true
@@ -237,6 +269,7 @@ remote_hash_len = 8
 | `max_total_gb` | int | `10` | Maximum total size (GB) of all snapshots per repository. Ignored when `no_size = true`. |
 | `size_margin_mb` | int | `0` | Margin in MB added to `max_total_gb` before triggering size-based rotation. |
 | `no_size` | bool | `true` | Disable size-based rotation. When `true`, `max_total_gb` and `size_margin_mb` are ignored. |
+| `link_dedup` | bool | `true` | Hardlink unchanged files to the previous snapshot instead of copying. See [Incremental Snapshots](#incremental-snapshots-hardlink-deduplication). |
 
 #### Per-Repository Rotation Overrides
 
@@ -251,6 +284,7 @@ keys use camelCase:
 | `backup.maxTotalGb` | `max_total_gb` |
 | `backup.sizeMarginMb` | `size_margin_mb` |
 | `backup.noSize` | `no_size` |
+| `backup.linkDedup` | `link_dedup` |
 
 Example — keep only 8 snapshots for a repository with large snapshots:
 
@@ -263,7 +297,8 @@ git config, applied on top of the global `config.toml`. Check the effective
 values with `devback status` (each value is marked `repo override` or
 `global`) or `devback -v --dry-run`. An invalid value (not an integer, a
 negative number, or a non-boolean for `backup.noSize`) fails the backup with
-an explicit error instead of silently falling back to the global value.
+an explicit error instead of silently falling back to the global value. The
+same applies to `backup.linkDedup`.
 
 #### `[notifications]` — Desktop Notifications
 
@@ -330,6 +365,7 @@ Accepted boolean values: `1`, `true`, `yes`, `on` (case-insensitive) are treated
 
 | Variable | Description |
 |----------|-------------|
+| `LINK_DEDUP` | `0/1/true/false/...` — overrides `link_dedup` from `config.toml` for a single run. Invalid values are ignored with a warning. |
 | `NO_COLOR` | When set (any value), disables colored terminal output. Follows the [no-color convention](https://no-color.org/). |
 | `TERM=dumb` | Disables colored terminal output. |
 | `GIT_REFLOG_ACTION` | Used internally by hooks. When it contains `rebase`, the `post-commit` hook is skipped to avoid duplicate backups (the `post-rewrite` hook handles rebase instead). |
@@ -421,6 +457,7 @@ Dry-run is available via `--dry-run` and simulates the entire process including 
 ## Performance
 
 - Parallel file copying (worker count = CPU * 2)
+- Hardlink deduplication: unchanged files are linked, not copied
 - Efficient handling of large repositories
 - Minimal memory usage
 - Optimized rotation algorithms

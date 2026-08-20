@@ -108,6 +108,7 @@ func runRootCommand(
 	if state.configExists {
 		applyBackupConfig(cfg, state.backupCfg)
 	}
+	applyLinkDedupEnv(cfg, logger)
 	fileLogger, _, cleanup := withFileLogging(logger, state.configFile.Logging, cfg.Verbose)
 	defer cleanup()
 	logger = fileLogger
@@ -231,6 +232,23 @@ func applyBackupConfig(target, source *usecase.Config) {
 	target.AutoRemoteMerge = source.AutoRemoteMerge
 	target.RemoteHashLen = source.RemoteHashLen
 	target.NoSize = source.NoSize
+	target.LinkDedup = source.LinkDedup
+}
+
+// applyLinkDedupEnv lets the LINK_DEDUP environment variable override the
+// config value; unknown values are ignored so a typo cannot change behavior
+// silently in either direction.
+func applyLinkDedupEnv(cfg *usecase.Config, logger *slog.Logger) {
+	raw, ok := os.LookupEnv("LINK_DEDUP")
+	if !ok {
+		return
+	}
+	value, err := usecase.ParseGitBool(raw)
+	if err != nil {
+		logger.Warn("Ignoring invalid LINK_DEDUP value", "value", raw)
+		return
+	}
+	cfg.LinkDedup = value
 }
 
 func setupLogger(verbose bool) *slog.Logger {

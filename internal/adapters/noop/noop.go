@@ -78,6 +78,11 @@ func (a Adapter) Move(ctx context.Context, src, dst string) error {
 	return errNotImplemented
 }
 
+// Link returns error for filesystem operations
+func (a Adapter) Link(ctx context.Context, oldname, newname string) error {
+	return errNotImplemented
+}
+
 // Readlink returns error for filesystem operations
 func (a Adapter) Readlink(ctx context.Context, path string) (string, error) {
 	return "", errNotImplemented

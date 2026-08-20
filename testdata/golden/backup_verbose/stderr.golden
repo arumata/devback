@@ -7,6 +7,7 @@ TIMESTAMP INF    Keep days: 7
 TIMESTAMP INF    Max total GB per repo: 1
 TIMESTAMP INF    Size margin MB: 0
 TIMESTAMP INF    No size check: true
+TIMESTAMP INF    Link dedup: true
 TIMESTAMP INF    Snapshot time format: HHMMSS-NNNNNNNNN
 TIMESTAMP INF    Repo key style: name+hash
 TIMESTAMP INF

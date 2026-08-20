@@ -32,5 +32,6 @@ func RuntimeConfigFromFile(cfg ConfigFile, homeDir string) (*Config, error) {
 		AutoRemoteMerge:   cfg.RepoKey.AutoRemoteMerge,
 		RemoteHashLen:     cfg.RepoKey.RemoteHashLen,
 		NoSize:            cfg.Backup.NoSize,
+		LinkDedup:         cfg.Backup.LinkDedup,
 	}, nil
 }

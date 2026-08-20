@@ -15,6 +15,7 @@ const (
 	gitKeyMaxTotalGb   = "backup.maxTotalGb"
 	gitKeySizeMarginMb = "backup.sizeMarginMb"
 	gitKeyNoSize       = "backup.noSize"
+	gitKeyLinkDedup    = "backup.linkDedup"
 )
 
 // ApplyRepoRotationOverrides overlays repo-level git config rotation settings
@@ -54,14 +55,24 @@ func ApplyRepoRotationOverrides(
 		bc.vlogf("→ Repo override: %s = %d", o.key, value)
 	}
 
-	raw := readRepoConfig(ctx, deps.Git, repoRoot, true, gitKeyNoSize)
-	if raw != "" {
+	boolOverrides := []struct {
+		key string
+		dst *bool
+	}{
+		{gitKeyNoSize, &cfg.NoSize},
+		{gitKeyLinkDedup, &cfg.LinkDedup},
+	}
+	for _, o := range boolOverrides {
+		raw := readRepoConfig(ctx, deps.Git, repoRoot, true, o.key)
+		if raw == "" {
+			continue
+		}
 		value, err := parseRotationBool(raw)
 		if err != nil {
-			return fmt.Errorf("invalid git config %s=%q: %v: %w", gitKeyNoSize, raw, err, ErrCritical)
+			return fmt.Errorf("invalid git config %s=%q: %v: %w", o.key, raw, err, ErrCritical)
 		}
-		cfg.NoSize = value
-		bc.vlogf("→ Repo override: %s = %t", gitKeyNoSize, value)
+		*o.dst = value
+		bc.vlogf("→ Repo override: %s = %t", o.key, value)
 	}
 	return nil
 }
@@ -76,6 +87,12 @@ func parseRotationInt(raw string) (int, error) {
 		return 0, fmt.Errorf("expected non-negative integer")
 	}
 	return value, nil
+}
+
+// ParseGitBool parses a git-style boolean value ("1"/"true"/"yes"/"on" and
+// their negatives); anything else is an error.
+func ParseGitBool(raw string) (bool, error) {
+	return parseRotationBool(raw)
 }
 
 // parseRotationBool parses a git-style boolean override value.
