@@ -327,6 +327,11 @@ func deriveRepoKeyAuto(
 		}
 	}
 
+	if key, ok := existingNameHashRepoKey(ctx, cfg, deps, repoRoot); ok {
+		bc.vlogf("→ Repo key (auto: existing %s): %s", repoKeyStyleNameHash, key)
+		return key, true
+	}
+
 	if remote, err := deps.Git.ConfigGet(ctx, repoRoot, "remote.origin.url"); err == nil && remote != "" {
 		if key, ok := repoKeyFromRemote(deps.FileSystem, remote, repoRoot, cfg); ok {
 			if !cfg.AutoRemoteMerge {
@@ -339,6 +344,25 @@ func deriveRepoKeyAuto(
 	}
 
 	return "", false
+}
+
+func existingNameHashRepoKey(
+	ctx context.Context,
+	cfg *Config,
+	deps *Dependencies,
+	repoRoot string,
+) (string, bool) {
+	if cfg.AutoRemoteMerge || strings.TrimSpace(cfg.BackupDir) == "" {
+		return "", false
+	}
+
+	key := repoKeyNameHash(deps.FileSystem, repoRoot)
+	repoDir := deps.FileSystem.Join(cfg.BackupDir, key)
+	snapshots, err := listSnapshots(ctx, deps, repoDir)
+	if err != nil || len(snapshots) == 0 {
+		return "", false
+	}
+	return key, true
 }
 
 func deriveRepoKeyCustom(ctx context.Context, deps *Dependencies, repoRoot string) (string, bool) {

@@ -327,10 +327,14 @@ same applies to `backup.linkDedup`.
 #### auto (default)
 Automatic style selection in priority order:
 1. `backup.slug` + repository basename
-2. `remote-hierarchy` + hash (if `repo_key.auto_remote_merge=false`)
-3. `name+hash` (fallback)
+2. an existing completed `name+hash` snapshot chain (if `repo_key.auto_remote_merge=false`)
+3. `remote-hierarchy` + hash (if `repo_key.auto_remote_merge=false`)
+4. `name+hash` (fallback)
 
 `backup.slug` can be set via `devback setup --slug`.
+If `origin` is added after snapshots have been created, the existing `name+hash`
+chain keeps priority and the backup path remains unchanged. Setting
+`auto_remote_merge=true` explicitly allows switching to the shared remote key.
 
 #### name+hash
 Format: `basename--8char_hash`

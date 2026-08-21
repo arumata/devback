@@ -118,7 +118,7 @@ level = %[11]q
 [repo_key]
 
 # Naming style for snapshot directories:
-#   auto             - auto-detect: slug, remote, or name+hash (default)
+#   auto             - auto-detect: slug, existing name+hash chain, remote, or name+hash (default)
 #   custom           - uses backup.slug (set via: devback setup --slug)
 #   remote-hierarchy - host/owner/repo from remote.origin.url
 style = %[12]q

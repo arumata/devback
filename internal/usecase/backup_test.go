@@ -14,7 +14,11 @@ import (
 	"time"
 )
 
-const gitDirName = ".git"
+const (
+	gitDirName                = ".git"
+	testRemoteOriginConfigKey = "remote.origin.url"
+	testRepoRemoteURL         = "https://github.com/acme/repo.git"
+)
 
 func newTestBackupContext(verbose bool) *backupContext {
 	return newBackupContext(slog.Default(), verbose)
@@ -217,7 +221,7 @@ func TestDeriveRepoKey_AutoRemoteWithHash(t *testing.T) {
 	cfg := &Config{RepoKeyStyle: repoKeyStyleAuto, AutoRemoteMerge: false, RemoteHashLen: 8}
 	mock := &mockGit{
 		ConfigGetFunc: func(ctx context.Context, repoPath, key string) (string, error) {
-			if key == "remote.origin.url" {
+			if key == testRemoteOriginConfigKey {
 				return "git@github.com:acme/app.git", nil
 			}
 			return "", os.ErrNotExist
@@ -233,6 +237,114 @@ func TestDeriveRepoKey_AutoRemoteWithHash(t *testing.T) {
 	}
 	if len(key) != len(expectedPrefix)+8 {
 		t.Fatalf("expected hash length 8, got %s", key)
+	}
+}
+
+func TestDeriveRepoKey_AutoPreservesExistingNameHashChain(t *testing.T) {
+	ctx := context.Background()
+	repoRoot := filepath.Join(t.TempDir(), "repo")
+	backupDir := t.TempDir()
+	cfg := &Config{
+		BackupDir:       backupDir,
+		RepoKeyStyle:    repoKeyStyleAuto,
+		AutoRemoteMerge: false,
+		RemoteHashLen:   8,
+	}
+	fs := newTestFileSystem()
+	expected := repoKeyNameHash(fs, repoRoot)
+	snapshotDir := filepath.Join(backupDir, expected, "2026-08-21", "102848-324705641")
+	if err := os.MkdirAll(snapshotDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapshotDir, ".done"), []byte("ok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &mockGit{
+		ConfigGetFunc: func(ctx context.Context, repoPath, key string) (string, error) {
+			if key == testRemoteOriginConfigKey {
+				return testRepoRemoteURL, nil
+			}
+			return "", os.ErrNotExist
+		},
+	}
+	deps := &Dependencies{Git: mock, FileSystem: fs}
+
+	key := deriveRepoKey(ctx, cfg, deps, repoRoot, newTestBackupContext(cfg.Verbose))
+
+	if key != expected {
+		t.Fatalf("expected existing name+hash key %s, got %s", expected, key)
+	}
+}
+
+func TestDeriveRepoKey_AutoIgnoresIncompleteNameHashChain(t *testing.T) {
+	ctx := context.Background()
+	repoRoot := filepath.Join(t.TempDir(), "repo")
+	backupDir := t.TempDir()
+	cfg := &Config{
+		BackupDir:       backupDir,
+		RepoKeyStyle:    repoKeyStyleAuto,
+		AutoRemoteMerge: false,
+		RemoteHashLen:   8,
+	}
+	fs := newTestFileSystem()
+	nameHashKey := repoKeyNameHash(fs, repoRoot)
+	incompleteDir := filepath.Join(backupDir, nameHashKey, "2026-08-21", "102848-324705641")
+	if err := os.MkdirAll(incompleteDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &mockGit{
+		ConfigGetFunc: func(ctx context.Context, repoPath, key string) (string, error) {
+			if key == testRemoteOriginConfigKey {
+				return testRepoRemoteURL, nil
+			}
+			return "", os.ErrNotExist
+		},
+	}
+	deps := &Dependencies{Git: mock, FileSystem: fs}
+
+	key := deriveRepoKey(ctx, cfg, deps, repoRoot, newTestBackupContext(cfg.Verbose))
+
+	if !strings.HasPrefix(key, "github.com/acme/repo--") {
+		t.Fatalf("expected remote key for incomplete name+hash chain, got %s", key)
+	}
+}
+
+func TestDeriveRepoKey_AutoRemoteMergeOverridesExistingNameHashChain(t *testing.T) {
+	ctx := context.Background()
+	repoRoot := filepath.Join(t.TempDir(), "repo")
+	backupDir := t.TempDir()
+	cfg := &Config{
+		BackupDir:       backupDir,
+		RepoKeyStyle:    repoKeyStyleAuto,
+		AutoRemoteMerge: true,
+		RemoteHashLen:   8,
+	}
+	fs := newTestFileSystem()
+	nameHashKey := repoKeyNameHash(fs, repoRoot)
+	snapshotDir := filepath.Join(backupDir, nameHashKey, "2026-08-21", "102848-324705641")
+	if err := os.MkdirAll(snapshotDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapshotDir, ".done"), []byte("ok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &mockGit{
+		ConfigGetFunc: func(ctx context.Context, repoPath, key string) (string, error) {
+			if key == testRemoteOriginConfigKey {
+				return testRepoRemoteURL, nil
+			}
+			return "", os.ErrNotExist
+		},
+	}
+	deps := &Dependencies{Git: mock, FileSystem: fs}
+
+	key := deriveRepoKey(ctx, cfg, deps, repoRoot, newTestBackupContext(cfg.Verbose))
+
+	if key != "github.com/acme/repo" {
+		t.Fatalf("expected merged remote key, got %s", key)
 	}
 }
 
@@ -271,7 +383,7 @@ func TestDeriveRepoKey_RemoteHierarchy(t *testing.T) {
 	cfg := &Config{RepoKeyStyle: repoKeyStyleRemoteHierarchy}
 	mock := &mockGit{
 		ConfigGetFunc: func(ctx context.Context, repoPath, key string) (string, error) {
-			if key == "remote.origin.url" {
+			if key == testRemoteOriginConfigKey {
 				return "https://github.com/acme/app.git", nil
 			}
 			return "", os.ErrNotExist

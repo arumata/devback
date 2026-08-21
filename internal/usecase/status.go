@@ -334,7 +334,7 @@ func buildStatusRepo(
 
 	backupSlug := readRepoConfig(ctx, deps.Git, repo.repoRoot, repo.isWorktree, "backup.slug")
 	backupEnabled := parseBoolValue(readRepoConfig(ctx, deps.Git, repo.repoRoot, repo.isWorktree, "backup.enabled"))
-	repoKey := deriveRepoKeyStatus(ctx, cfg, deps, repo.repoRoot, backupSlug, logger)
+	repoKey := deriveRepoKeyStatus(ctx, cfg, deps, repo.repoRoot, backupSlug, backupBaseExpanded, logger)
 	rotation := buildRotationStatus(ctx, deps.Git, cfg, repo.repoRoot, repo.isWorktree)
 
 	backups := StatusBackups{}
@@ -709,6 +709,7 @@ func deriveRepoKeyStatus(
 	deps *Dependencies,
 	repoRoot string,
 	backupSlug string,
+	backupBase string,
 	logger *slog.Logger,
 ) string {
 	style := strings.TrimSpace(cfg.RepoKey.Style)
@@ -716,6 +717,7 @@ func deriveRepoKeyStatus(
 		style = repoKeyStyleAuto
 	}
 	compat := &Config{
+		BackupDir:       backupBase,
 		AutoRemoteMerge: cfg.RepoKey.AutoRemoteMerge,
 		RemoteHashLen:   cfg.RepoKey.RemoteHashLen,
 	}
@@ -726,6 +728,9 @@ func deriveRepoKeyStatus(
 			if key, ok := repoKeyFromSlug(deps.FileSystem, repoRoot, backupSlug); ok {
 				return key
 			}
+		}
+		if key, ok := existingNameHashRepoKey(ctx, compat, deps, repoRoot); ok {
+			return key
 		}
 		if remote, err := deps.Git.ConfigGet(ctx, repoRoot, "remote.origin.url"); err == nil && remote != "" {
 			if key, ok := repoKeyFromRemote(deps.FileSystem, remote, repoRoot, compat); ok {

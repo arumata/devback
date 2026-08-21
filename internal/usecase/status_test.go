@@ -446,6 +446,48 @@ func TestStatus_ScanBackups(t *testing.T) {
 	}
 }
 
+func TestStatus_AutoPreservesExistingNameHashChainAfterOriginAppears(t *testing.T) {
+	ctx := context.Background()
+	env := newStatusRepoEnv(t)
+	logger := newStatusLogger()
+	seedHooks(t, env.templatesDir, env.hooksDir, false)
+
+	expectedRepoKey := repoKeyNameHash(env.fs, env.repoRoot)
+	createSnapshot(t, env.backupBase, expectedRepoKey, "2026-08-21", "102848-324705641", 0)
+
+	git := &mockGitStatus{
+		repoRoot:  env.repoRoot,
+		gitDir:    ".git",
+		commonDir: ".git",
+		local: map[string]string{
+			"backup.enabled":    "true",
+			"remote.origin.url": "https://github.com/acme/repo.git",
+		},
+		global: map[string]string{
+			"init.templateDir": normalizePath(env.fs, env.fs.Dir(DefaultTemplatesDir()), env.homeDir),
+		},
+	}
+	deps := &Dependencies{
+		FileSystem: env.fs,
+		Config:     env.cfgPort,
+		Git:        git,
+	}
+
+	report, err := Status(ctx, StatusOptions{HomeDir: env.homeDir, ScanBackups: true}, deps, logger)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if report.Repo == nil {
+		t.Fatalf("expected repo info")
+	}
+	if report.Repo.RepoKey != expectedRepoKey {
+		t.Fatalf("expected existing name+hash key %s, got %s", expectedRepoKey, report.Repo.RepoKey)
+	}
+	if report.Repo.Backups.SnapshotCount != 1 {
+		t.Fatalf("expected existing chain to be scanned, got %d snapshots", report.Repo.Backups.SnapshotCount)
+	}
+}
+
 func TestStatus_OutsideGitRepo(t *testing.T) {
 	t.Helper()
 
