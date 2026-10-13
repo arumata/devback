@@ -355,7 +355,7 @@ func TestApplySizeLimit_SharedInodesRemovesOnlyOldest(t *testing.T) {
 		t.Fatal(err)
 	}
 	alive := []bool{true, true, true}
-	applySizeLimit(ctx, deps, cfg, false, bc, snaps, alive)
+	applySizeLimit(ctx, deps, cfg, false, bc, snaps, alive, snaps[len(snaps)-1].TimeDir)
 
 	if alive[0] {
 		t.Fatal("oldest snapshot must be removed")

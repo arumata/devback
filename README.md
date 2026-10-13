@@ -449,7 +449,17 @@ The tool automatically manages snapshot size and count:
 2. **By count**: Keeps no more than `backup.keep_count` snapshots
 3. **By size**: Removes old snapshots when `backup.max_total_gb` is exceeded
 
+Rotation always preserves the completed snapshot created by the current backup.
+If that snapshot alone exceeds the size limit including `size_margin_mb`, it
+stays on disk and the log explicitly reports the excess and retained path.
+A successful backup still exits with code 0: the snapshot is saved, but the
+size limit is not met. Failed deletions of older snapshots are logged and those
+snapshots remain included in size accounting. The `.done` marker is checked
+before reporting success; an unavailable completed snapshot causes exit code 1.
+
 Dry-run is available via `--dry-run` and simulates the entire process including rotation.
+It protects the latest existing completed snapshot and does not estimate the
+size of the future backup.
 
 ## Security
 

@@ -801,7 +801,7 @@ func TestListSnapshotsAndRotateRepo(t *testing.T) {
 	}
 
 	cfg := &Config{KeepDays: 1, KeepCount: 1}
-	rotateRepo(ctx, &Dependencies{FileSystem: fs}, repoDir, cfg, false, newTestBackupContext(false))
+	rotateRepo(ctx, &Dependencies{FileSystem: fs}, repoDir, cfg, false, newTestBackupContext(false), "")
 
 	remaining, err := listSnapshots(ctx, &Dependencies{FileSystem: fs}, repoDir)
 	if err != nil {
@@ -829,7 +829,7 @@ func TestRotateRepo_SizeDryRunAndSummary(t *testing.T) {
 	}
 
 	cfg := &Config{MaxTotalGBPerRepo: 1, SizeMarginMB: -1024, NoSize: false}
-	rotateRepo(ctx, &Dependencies{FileSystem: fs}, repoDir, cfg, true, newTestBackupContext(true))
+	rotateRepo(ctx, &Dependencies{FileSystem: fs}, repoDir, cfg, true, newTestBackupContext(true), "")
 }
 
 func TestRemoveSnapshot_DoesNotRemoveDateDirWithRemaining(t *testing.T) {

@@ -7,7 +7,19 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"strings"
 )
+
+// bodyMarkupEscaper escapes the notification body for notification servers that
+// advertise the freedesktop `body-markup` capability (KDE Plasma among them).
+// There the body is parsed as markup, so a raw `<` in a repository path makes
+// the server read the rest as a broken tag and drop everything after it, with no
+// error reported anywhere: the notification still looks delivered. Our body is
+// data, never intentional markup. The summary is plain text and stays as is,
+// where entities would be displayed literally.
+//
+//nolint:gochecknoglobals // Immutable replacer is safe to share across concurrent notifications.
+var bodyMarkupEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
 // Send sends a desktop notification on Linux.
 func (a *Adapter) Send(ctx context.Context, title, message, sound string) error {
@@ -21,7 +33,7 @@ func (a *Adapter) Send(ctx context.Context, title, message, sound string) error 
 		return nil
 	}
 
-	cmd := exec.CommandContext(ctx, notifyPath, title, message)
+	cmd := exec.CommandContext(ctx, notifyPath, title, bodyMarkupEscaper.Replace(message))
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if runErr := cmd.Run(); runErr != nil {

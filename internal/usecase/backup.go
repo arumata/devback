@@ -1010,32 +1010,58 @@ func chargedSnapshotSizesKB(
 	return sizes, totalKB
 }
 
-func removeSnapshot(ctx context.Context, deps *Dependencies, s snapshot, bc *backupContext) {
+func removeSnapshot(ctx context.Context, deps *Dependencies, s snapshot, bc *backupContext) bool {
 	bc.logf("[rotate] remove %s", s.TimeDir)
-	_ = deps.FileSystem.RemoveAll(ctx, s.TimeDir)
+	if err := deps.FileSystem.RemoveAll(ctx, s.TimeDir); err != nil {
+		bc.warnf("rotation(remove '%s'): %v", s.TimeDir, err)
+		return false
+	}
 	entries, err := deps.FileSystem.ReadDir(ctx, s.DateDir)
 	if err == nil && len(entries) == 0 {
 		_ = deps.FileSystem.RemoveAll(ctx, s.DateDir)
 	} else if err != nil && !deps.FileSystem.IsNotExist(err) {
 		bc.warnf("rotation(date dir): %v", err)
 	}
+	return true
 }
 
-func rotateRepo(ctx context.Context, deps *Dependencies, repoDir string, cfg *Config, dryRun bool, bc *backupContext) {
+func rotateRepo(
+	ctx context.Context,
+	deps *Dependencies,
+	repoDir string,
+	cfg *Config,
+	dryRun bool,
+	bc *backupContext,
+	protectedPath string,
+) {
 	snaps, err := listSnapshots(ctx, deps, repoDir)
 	if err != nil {
 		bc.warnf("rotation(list): %v", err)
 		return
 	}
+	if protectedPath == "" && len(snaps) > 0 {
+		protectedPath = snaps[len(snaps)-1].TimeDir
+	}
+	// Charge shared inodes to the protected snapshot first, even if the clock
+	// moved backwards and existing snapshots have later directory names.
+	sort.SliceStable(snaps, func(i, j int) bool {
+		if snaps[i].TimeDir == protectedPath {
+			return false
+		}
+		if snaps[j].TimeDir == protectedPath {
+			return true
+		}
+		return snaps[i].TimeDir < snaps[j].TimeDir
+	})
 	alive := make([]bool, len(snaps))
 	for i := range alive {
 		alive[i] = true
 	}
 
 	now := time.Now()
-	applyKeepDays(ctx, deps, cfg, dryRun, bc, snaps, alive, now)
-	applyKeepCount(ctx, deps, cfg, dryRun, bc, snaps, alive)
-	applySizeLimit(ctx, deps, cfg, dryRun, bc, snaps, alive)
+	applyKeepDays(ctx, deps, cfg, dryRun, bc, snaps, alive, now, protectedPath)
+	applyKeepCount(ctx, deps, cfg, dryRun, bc, snaps, alive, protectedPath)
+	applySizeLimit(ctx, deps, cfg, dryRun, bc, snaps, alive, protectedPath)
 
 	if dryRun {
 		bc.logf("ℹ️ Rotation was DRY-RUN (no deletions performed).")
@@ -1054,13 +1080,14 @@ func applyKeepDays(
 	snaps []snapshot,
 	alive []bool,
 	now time.Time,
+	protectedPath string,
 ) {
 	if cfg.KeepDays <= 0 {
 		return
 	}
 	limit := time.Duration(cfg.KeepDays) * 24 * time.Hour
 	for i, s := range snaps {
-		if !alive[i] {
+		if !alive[i] || s.TimeDir == protectedPath {
 			continue
 		}
 		fi, err := deps.FileSystem.Stat(ctx, s.Done)
@@ -1069,8 +1096,8 @@ func applyKeepDays(
 		}
 		if now.Sub(fi.ModTime()) > limit {
 			bc.logf("[rotate:age] remove %s (older than %dd)", s.TimeDir, cfg.KeepDays)
-			if !dryRun {
-				removeSnapshot(ctx, deps, s, bc)
+			if !dryRun && !removeSnapshot(ctx, deps, s, bc) {
+				continue
 			}
 			alive[i] = false
 		}
@@ -1085,6 +1112,7 @@ func applyKeepCount(
 	bc *backupContext,
 	snaps []snapshot,
 	alive []bool,
+	protectedPath string,
 ) {
 	if cfg.KeepCount <= 0 {
 		return
@@ -1100,12 +1128,12 @@ func applyKeepCount(
 	}
 	toRemove := live - cfg.KeepCount
 	for i := 0; i < len(snaps) && toRemove > 0; i++ {
-		if !alive[i] {
+		if !alive[i] || snaps[i].TimeDir == protectedPath {
 			continue
 		}
 		bc.logf("[rotate:count] remove %s (exceeds %d)", snaps[i].TimeDir, cfg.KeepCount)
-		if !dryRun {
-			removeSnapshot(ctx, deps, snaps[i], bc)
+		if !dryRun && !removeSnapshot(ctx, deps, snaps[i], bc) {
+			continue
 		}
 		alive[i] = false
 		toRemove--
@@ -1120,6 +1148,7 @@ func applySizeLimit(
 	bc *backupContext,
 	snaps []snapshot,
 	alive []bool,
+	protectedPath string,
 ) {
 	if cfg.MaxTotalGBPerRepo <= 0 || cfg.NoSize {
 		return
@@ -1130,8 +1159,9 @@ func applySizeLimit(
 	sizes, totalKB := chargedSnapshotSizesKB(ctx, deps, snaps, alive, bc)
 	bc.vlogf("[rotate:size] total=%s limit=%s", humanKB(totalKB), humanKB(kbLimit))
 
+	deletionFailed := false
 	for i := 0; i < len(snaps) && totalKB > kbLimit; i++ {
-		if !alive[i] {
+		if !alive[i] || snaps[i].TimeDir == protectedPath {
 			continue
 		}
 		bc.logf(
@@ -1140,11 +1170,21 @@ func applySizeLimit(
 			humanKB(totalKB),
 			humanKB(kbLimit),
 		)
-		if !dryRun {
-			removeSnapshot(ctx, deps, snaps[i], bc)
+		if !dryRun && !removeSnapshot(ctx, deps, snaps[i], bc) {
+			deletionFailed = true
+			continue
 		}
-		totalKB -= sizes[i]
 		alive[i] = false
+		if deletionFailed {
+			// Shared inodes can remain in an older snapshot whose deletion failed.
+			_, totalKB = chargedSnapshotSizesKB(ctx, deps, snaps, alive, bc)
+		} else {
+			totalKB -= sizes[i]
+		}
+	}
+	if totalKB > kbLimit {
+		bc.warnf("[rotate:size] size limit exceeded: total %s > %s; snapshot retained: %s (dry-run=%t)",
+			humanKB(totalKB), humanKB(kbLimit), protectedPath, dryRun)
 	}
 }
 
@@ -1440,7 +1480,7 @@ func handleDryRun(
 
 	repoDir := deps.FileSystem.Join(cfg.BackupDir, repoKey)
 	if _, err := deps.FileSystem.Stat(ctx, repoDir); err == nil {
-		rotateRepo(ctx, deps, repoDir, cfg, true, bc)
+		rotateRepo(ctx, deps, repoDir, cfg, true, bc, "")
 	} else if err != nil && !deps.FileSystem.IsNotExist(err) {
 		bc.warnf("dry-run rotation stat '%s': %v", repoDir, err)
 	}
@@ -1512,9 +1552,12 @@ func handleBackupFlow(
 				bc.warnf("rotation panic: %v", r)
 			}
 		}()
-		rotateRepo(ctx, deps, repoDir, cfg, false, bc)
+		rotateRepo(ctx, deps, repoDir, cfg, false, bc, targetPath)
 	}()
 
+	if _, err := deps.FileSystem.Stat(ctx, done); err != nil {
+		return result, fmt.Errorf("backup snapshot unavailable after rotation (%s): %v: %w", targetPath, err, ErrCritical)
+	}
 	bc.logf("✓ Backup finished → %s", targetPath)
 
 	printBackupSummary(result, bc)
